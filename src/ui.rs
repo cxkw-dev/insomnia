@@ -53,6 +53,9 @@ pub struct ViewState {
     pub power: PowerStatus,
     /// Dashboard cards with data, in display order (custom cards, then docker).
     pub cards: Vec<SideCard>,
+    /// `[dashboard] combined` — render the (single, pre-folded) card's rows
+    /// inside the status box itself, so the whole dashboard is one box.
+    pub merged: bool,
     /// Per-flyer sky toggles, aligned with [`sky::FLYERS`].
     pub sky: Vec<bool>,
 }
@@ -112,6 +115,7 @@ pub fn run(cfg: &Config, kinds: &[Kind], fc: &FileConfig) -> io::Result<Duration
             kinds: kinds.to_vec(),
             power: power.clone(),
             cards: build_cards(&fc.cards, &docker, &card_data, &fc.dashboard),
+            merged: fc.dashboard.combined,
             sky: sky_on.clone(),
         };
         if let Err(e) = terminal.draw(|f| draw(f, &state)) {
@@ -145,8 +149,9 @@ fn restore_terminal() -> io::Result<()> {
 
 /// Assemble the render-ready card list: custom cards in config order, docker
 /// last. Cards with no data (source down) or no rows simply don't exist.
-/// With `[dashboard] combined = true` the survivors fold into one box, each
-/// as a section under its own glyph-and-accent header.
+/// With `[dashboard] combined = true` the survivors fold into one card, each
+/// as a section under its own glyph-and-accent header; [`draw`] then renders
+/// that card's rows inside the status box, so everything is one box.
 fn build_cards(
     configs: &[CardConfig],
     docker: &Option<Vec<Container>>,
@@ -192,7 +197,7 @@ fn build_cards(
             });
         }
     }
-    if dash.combined && out.len() > 1 {
+    if dash.combined && !out.is_empty() {
         let mut rows = Vec::new();
         for (k, c) in out.iter().enumerate() {
             if k > 0 {
@@ -263,22 +268,33 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
         return;
     }
 
+    // Merged mode: the dashboard is one pre-folded card whose rows render
+    // inside the status box itself — there are no side cards at all.
+    let merged_card = if s.merged { s.cards.first() } else { None };
     // The side cards sail beside the status card on a wide terminal and dock
     // beneath it on a narrow one. Cards are placed in order, each getting as
     // many rows as the height allows; a card with no headroom left shrinks
     // to a summary row inside the status card.
-    let has_side = !s.cards.is_empty();
+    let has_side = !s.cards.is_empty() && !s.merged;
     let wide = has_side && area.width >= MAIN_W + GAP + SIDE_W + 2;
     // Cards marked `left` get their own column when the terminal holds three;
     // otherwise they flow into the right-hand stack with everything else.
     // When *every* card is `left` there is no third column — the single
-    // column simply swaps to the other side of the status card.
-    let left_idx: Vec<usize> = (0..s.cards.len()).filter(|&i| s.cards[i].left).collect();
+    // column simply swaps to the other side of the status card. In merged
+    // mode nothing is placed at all; the rows live in the status box.
+    let card_idx: Vec<usize> = if s.merged {
+        Vec::new()
+    } else {
+        (0..s.cards.len()).collect()
+    };
+    let left_idx: Vec<usize> = card_idx.iter().copied().filter(|&i| s.cards[i].left).collect();
     let wide3 = wide
         && !left_idx.is_empty()
-        && left_idx.len() < s.cards.len()
+        && left_idx.len() < card_idx.len()
         && area.width >= MAIN_W + 2 * (GAP + SIDE_W) + 2;
-    let right_idx: Vec<usize> = (0..s.cards.len())
+    let right_idx: Vec<usize> = card_idx
+        .iter()
+        .copied()
         .filter(|&i| !(wide3 && s.cards[i].left))
         .collect();
     let main_base = status_lines(s, &[]).len() as u16 + 3;
@@ -312,7 +328,32 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
         folded = refold;
     }
 
-    let lines = status_lines(s, &folded);
+    // The status box widens to hold the merged rows whole, like a side card.
+    let bw = match merged_card {
+        Some(c) => natural_width(c)
+            .clamp(MAIN_W, SIDE_MAX_W)
+            .min(area.width.saturating_sub(2)),
+        None => MAIN_W.min(area.width.saturating_sub(2)),
+    };
+    let mut lines = status_lines(s, &folded);
+    if let Some(card) = merged_card {
+        // As many rows as the height allows, then a "+N more" line.
+        let budget = area.height.saturating_sub(art::TITLE_H + 1 + 2 + 2 + 3) as usize;
+        let base = lines.len() + 1;
+        let n = card.rows.len();
+        let shown = if base + n <= budget {
+            n
+        } else {
+            budget.saturating_sub(base + 1)
+        };
+        lines.push(Line::default());
+        lines.extend(card_row_lines(
+            &card.rows,
+            shown,
+            bw.saturating_sub(2) as usize,
+            s.tick,
+        ));
+    }
     let main_h = lines.len() as u16 + 3;
     let col_h = |p: &[(usize, u16, usize)]| -> u16 {
         p.iter().map(|(_, h, _)| h).sum::<u16>() + p.len().saturating_sub(1) as u16
@@ -332,7 +373,6 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
         height: art::TITLE_H,
     };
     let cards_y = y0 + art::TITLE_H + 1;
-    let bw = MAIN_W.min(area.width.saturating_sub(2));
     // The side column widens past SIDE_W to hold its longest row whole —
     // capped by SIDE_MAX_W and by the room this layout actually has — so
     // usage details never get clipped just because the box was born narrow.
@@ -672,8 +712,16 @@ fn render_side_card(card: &SideCard, shown: usize, rect: Rect, tick: u64, buf: &
     let inner = block.inner(rect);
     block.render(rect, buf);
 
-    let name_w = card
-        .rows
+    let mut lines = vec![Line::default()];
+    lines.extend(card_row_lines(&card.rows, shown, inner.width as usize, tick));
+    Paragraph::new(lines).render(inner, buf);
+}
+
+/// The body lines of a card: health dots, aligned name/detail columns,
+/// accented headers, and a trailing "+N more" when rows are cut. `inner_w`
+/// is the width of the box the lines will live in, minus its borders.
+fn card_row_lines(rows: &[CardRow], shown: usize, inner_w: usize, tick: u64) -> Vec<Line<'static>> {
+    let name_w = rows
         .iter()
         .take(shown)
         .filter(|r| r.detail.is_some())
@@ -681,8 +729,8 @@ fn render_side_card(card: &SideCard, shown: usize, rect: Rect, tick: u64, buf: &
         .max()
         .unwrap_or(NAME_W)
         .min(NAME_W);
-    let mut lines = vec![Line::default()];
-    for (i, r) in card.rows.iter().take(shown).enumerate() {
+    let mut lines = Vec::new();
+    for (i, r) in rows.iter().take(shown).enumerate() {
         let mut spans = vec![Span::raw("  ")];
         let mut used = 2usize;
         if let Some(h) = r.health {
@@ -701,30 +749,30 @@ fn render_side_card(card: &SideCard, shown: usize, rect: Rect, tick: u64, buf: &
                     format!("{:<name_w$} ", truncate(&r.name, name_w)),
                     Style::default().fg(SLATE_400),
                 ));
-                let dw = (inner.width as usize).saturating_sub(used + name_w + 1);
+                let dw = inner_w.saturating_sub(used + name_w + 1);
                 spans.push(Span::styled(
                     truncate(detail, dw),
                     Style::default().fg(SLATE_500),
                 ));
             }
             None => {
-                let w = (inner.width as usize).saturating_sub(used);
+                let w = inner_w.saturating_sub(used);
                 let fg = r.accent.map_or(SLATE_400, |rgb| scale(rgb, 1.0));
                 spans.push(Span::styled(truncate(&r.name, w), Style::default().fg(fg)));
             }
         }
         lines.push(Line::from(spans));
     }
-    if card.rows.len() > shown {
+    if rows.len() > shown {
         lines.push(Line::from(vec![
             Span::raw("    "),
             Span::styled(
-                format!("+{} more", card.rows.len() - shown),
+                format!("+{} more", rows.len() - shown),
                 Style::default().fg(SLATE_600),
             ),
         ]));
     }
-    Paragraph::new(lines).render(inner, buf);
+    lines
 }
 
 fn truncate(s: &str, max: usize) -> String {

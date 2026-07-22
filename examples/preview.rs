@@ -26,6 +26,12 @@ fn main() {
         detail: Some(detail.into()),
         accent: None,
     };
+    let hdr = |accent: (u8, u8, u8), name: &str| CardRow {
+        health: None,
+        name: name.into(),
+        detail: None,
+        accent: Some(accent),
+    };
 
     let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
     let state = ViewState {
@@ -38,51 +44,34 @@ fn main() {
             on_ac: true,
             percent: Some(100),
         },
-        cards: vec![
-            SideCard {
-                title: "todos".into(),
-                glyph: "⌖".into(),
-                accent: (167, 139, 250),
-                rows: vec![
-                    plain("#42 ship the login flow"),
-                    plain("#57 tidy the release notes"),
-                ],
-                summary: "2 items".into(),
-                left: false,
-            },
-            // Mirrors the ai-usage card: long account names and details wide
-            // enough to force the box past SIDE_W.
-            SideCard {
-                title: "ai usage".into(),
-                glyph: "✦".into(),
-                accent: (148, 163, 184),
-                rows: vec![
-                    plain("✻ claude"),
-                    status(Health::Good, "▸ cxkw.dev", "5h 9% · wk 42%"),
-                    plain("◎ openai codex"),
-                    status(Health::Warn, "▸ cxkw.dev", "pro · 5h 12% · wk 78%"),
-                    status(Health::Off, "  andy.nguyen", "not logged in"),
-                    plain("⧉ copilot"),
-                    status(Health::Good, "▸ andy-nguyen-cxkw", "biz · unlimited"),
-                ],
-                summary: "7 items".into(),
-                left: true,
-            },
-            SideCard {
-                title: "docker".into(),
-                glyph: "≋".into(),
-                accent: (59, 130, 246),
-                rows: vec![
-                    status(Health::Warn, "worker", "restarting"),
-                    status(Health::Good, "web", "up 3 hours"),
-                    status(Health::Good, "postgres", "up 3 hours"),
-                    status(Health::Good, "redis", "up 3 hours"),
-                    status(Health::Good, "builder", "up 2 hours"),
-                ],
-                summary: "5 running".into(),
-                left: false,
-            },
-        ],
+        // Mirrors `[dashboard] combined = true`: one pre-folded card — section
+        // headers, long account names, details wide enough to force growth —
+        // rendered inside the status box.
+        cards: vec![SideCard {
+            title: "dashboard".into(),
+            glyph: "✦".into(),
+            accent: (148, 163, 184),
+            rows: vec![
+                hdr((148, 163, 184), "✦ ai usage"),
+                hdr((217, 119, 87), "✻ claude"),
+                status(Health::Good, "▸ cxkw.dev", "5h 9% · wk 42%"),
+                hdr((16, 163, 127), "◎ openai codex"),
+                status(Health::Warn, "▸ cxkw.dev", "pro · 5h 12% · wk 78%"),
+                status(Health::Off, "  andy.nguyen", "not logged in"),
+                hdr((167, 139, 250), "⧉ copilot"),
+                status(Health::Good, "▸ andy-nguyen-cxkw", "biz · unlimited"),
+                plain(""),
+                hdr((59, 130, 246), "≋ docker"),
+                status(Health::Warn, "worker", "restarting"),
+                status(Health::Good, "web", "up 3 hours"),
+                status(Health::Good, "postgres", "up 3 hours"),
+                status(Health::Good, "redis", "up 3 hours"),
+                status(Health::Good, "builder", "up 2 hours"),
+            ],
+            summary: "2 sections".into(),
+            left: false,
+        }],
+        merged: true,
         sky: vec![true; sky::FLYERS.len()],
     };
     terminal.draw(|f| draw(f, &state)).unwrap();
