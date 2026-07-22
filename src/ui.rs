@@ -23,7 +23,7 @@ use ratatui::{
 
 use crate::art;
 use crate::collect::{self, CardData, CardRow, Container, Health, Update};
-use crate::config::{accent_rgb, CardConfig, Config, FileConfig};
+use crate::config::{accent_rgb, CardConfig, Config, DashboardConfig, FileConfig};
 use crate::power::{Kind, PowerStatus};
 use crate::sky;
 use crate::theme::{
@@ -34,7 +34,8 @@ use crate::theme::{
 const MAIN_W: u16 = 46;
 const SIDE_W: u16 = 40;
 const GAP: u16 = 2;
-/// Column width for row names when a row has a detail column.
+/// Widest the name column may grow when a row has a detail column; cards
+/// with shorter names shrink the column so details get the leftover room.
 const NAME_W: usize = 21;
 const DEFAULT_GLYPH: &str = "◆";
 const DEFAULT_ACCENT: (u8, u8, u8) = (167, 139, 250);
@@ -63,6 +64,9 @@ pub struct SideCard {
     /// One-line stand-in shown inside the status card when this card
     /// doesn't fit the terminal.
     pub summary: String,
+    /// Floats left of the status card when the terminal fits three columns;
+    /// otherwise the card flows with the right-hand stack.
+    pub left: bool,
 }
 
 pub fn run(cfg: &Config, kinds: &[Kind], fc: &FileConfig) -> io::Result<Duration> {
@@ -105,7 +109,7 @@ pub fn run(cfg: &Config, kinds: &[Kind], fc: &FileConfig) -> io::Result<Duration
             remaining: deadline.map(|d| d.saturating_duration_since(now)),
             kinds: kinds.to_vec(),
             power: power.clone(),
-            cards: build_cards(&fc.cards, &docker, &card_data),
+            cards: build_cards(&fc.cards, &docker, &card_data, &fc.dashboard),
             sky: sky_on.clone(),
         };
         if let Err(e) = terminal.draw(|f| draw(f, &state)) {
@@ -139,10 +143,13 @@ fn restore_terminal() -> io::Result<()> {
 
 /// Assemble the render-ready card list: custom cards in config order, docker
 /// last. Cards with no data (source down) or no rows simply don't exist.
+/// With `[dashboard] combined = true` the survivors fold into one box, each
+/// as a section under its own glyph-and-accent header.
 fn build_cards(
     configs: &[CardConfig],
     docker: &Option<Vec<Container>>,
     data: &[Option<CardData>],
+    dash: &DashboardConfig,
 ) -> Vec<SideCard> {
     let mut out = Vec::new();
     for (cfg, latest) in configs.iter().zip(data) {
@@ -160,6 +167,7 @@ fn build_cards(
                 .unwrap_or(DEFAULT_ACCENT),
             rows: d.rows.clone(),
             summary: format!("{} items", d.rows.len()),
+            left: cfg.side.as_deref() == Some("left"),
         });
     }
     if let Some(containers) = docker {
@@ -174,13 +182,75 @@ fn build_cards(
                         health: Some(c.health),
                         name: c.name.clone(),
                         detail: Some(c.status.clone()),
+                        accent: None,
                     })
                     .collect(),
                 summary: format!("{} running", containers.len()),
+                left: false,
             });
         }
     }
+    if dash.combined && out.len() > 1 {
+        let mut rows = Vec::new();
+        for (k, c) in out.iter().enumerate() {
+            if k > 0 {
+                rows.push(CardRow {
+                    health: None,
+                    name: String::new(),
+                    detail: None,
+                    accent: None,
+                });
+            }
+            rows.push(CardRow {
+                health: None,
+                name: format!("{} {}", c.glyph, c.title),
+                detail: None,
+                accent: Some(c.accent),
+            });
+            rows.extend(c.rows.iter().cloned());
+        }
+        let summary = format!("{} sections", out.len());
+        out = vec![SideCard {
+            title: dash.title.clone().unwrap_or_else(|| "dashboard".into()),
+            glyph: dash.glyph.clone().unwrap_or_else(|| DEFAULT_GLYPH.into()),
+            accent: dash
+                .accent
+                .as_deref()
+                .and_then(accent_rgb)
+                .unwrap_or(DEFAULT_ACCENT),
+            rows,
+            summary,
+            left: dash.side.as_deref() == Some("left"),
+        }];
+    }
     out
+}
+
+/// Greedy top-down placement of the cards in `idx` into `avail` rows:
+/// (card index, card height, rows shown) for each one that fits. Cards in
+/// `skip` and cards with no headroom left land in `fold` instead.
+fn place_column(
+    cards: &[SideCard],
+    idx: &[usize],
+    mut avail: u16,
+    skip: &[usize],
+    fold: &mut Vec<usize>,
+) -> Vec<(usize, u16, usize)> {
+    let mut placed = Vec::new();
+    for &i in idx {
+        let n = cards[i].rows.len();
+        let gap = u16::from(!placed.is_empty());
+        let budget = (avail.saturating_sub(gap) as usize).saturating_sub(4);
+        if skip.contains(&i) || budget < 2 {
+            fold.push(i);
+            continue;
+        }
+        let shown = if n <= budget { n } else { budget - 1 };
+        let h = (shown + usize::from(n > shown) + 4) as u16;
+        avail = avail.saturating_sub(h + gap);
+        placed.push((i, h, shown));
+    }
+    placed
 }
 
 pub fn draw(f: &mut Frame, s: &ViewState) {
@@ -197,13 +267,25 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
     // to a summary row inside the status card.
     let has_side = !s.cards.is_empty();
     let wide = has_side && area.width >= MAIN_W + GAP + SIDE_W + 2;
+    // Cards marked `left` get their own column when the terminal holds three;
+    // otherwise they flow into the right-hand stack with everything else.
+    // When *every* card is `left` there is no third column — the single
+    // column simply swaps to the other side of the status card.
+    let left_idx: Vec<usize> = (0..s.cards.len()).filter(|&i| s.cards[i].left).collect();
+    let wide3 = wide
+        && !left_idx.is_empty()
+        && left_idx.len() < s.cards.len()
+        && area.width >= MAIN_W + 2 * (GAP + SIDE_W) + 2;
+    let right_idx: Vec<usize> = (0..s.cards.len())
+        .filter(|&i| !(wide3 && s.cards[i].left))
+        .collect();
     let main_base = status_lines(s, &[]).len() as u16 + 3;
 
-    // (card index, card height, rows shown) for every card that fits.
     // Folding a card adds a summary row to the status card, which in the
     // stacked layout shrinks the very budget being divided — so placement
     // reruns until the folded set stops changing.
-    let mut placed: Vec<(usize, u16, usize)> = Vec::new();
+    let mut placed: Vec<(usize, u16, usize)>;
+    let mut placed_left: Vec<(usize, u16, usize)>;
     let mut folded: Vec<usize> = Vec::new();
     loop {
         let growth = if folded.is_empty() {
@@ -211,25 +293,17 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
         } else {
             folded.len() as u16 + 1
         };
-        let mut avail = area
+        let avail = area
             .height
             .saturating_sub(art::TITLE_H + 1 + 2 + 2)
             .saturating_sub(if wide { 0 } else { main_base + growth + 1 });
-        placed.clear();
         let mut refold: Vec<usize> = Vec::new();
-        for (i, card) in s.cards.iter().enumerate() {
-            let n = card.rows.len();
-            let gap = u16::from(!placed.is_empty());
-            let budget = (avail.saturating_sub(gap) as usize).saturating_sub(4);
-            if folded.contains(&i) || budget < 2 {
-                refold.push(i);
-                continue;
-            }
-            let shown = if n <= budget { n } else { budget - 1 };
-            let h = (shown + usize::from(n > shown) + 4) as u16;
-            avail = avail.saturating_sub(h + gap);
-            placed.push((i, h, shown));
-        }
+        placed_left = if wide3 {
+            place_column(&s.cards, &left_idx, avail, &folded, &mut refold)
+        } else {
+            Vec::new()
+        };
+        placed = place_column(&s.cards, &right_idx, avail, &folded, &mut refold);
         if refold == folded {
             break;
         }
@@ -238,8 +312,10 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
 
     let lines = status_lines(s, &folded);
     let main_h = lines.len() as u16 + 3;
-    let side_h: u16 =
-        placed.iter().map(|(_, h, _)| h).sum::<u16>() + placed.len().saturating_sub(1) as u16;
+    let col_h = |p: &[(usize, u16, usize)]| -> u16 {
+        p.iter().map(|(_, h, _)| h).sum::<u16>() + p.len().saturating_sub(1) as u16
+    };
+    let side_h = col_h(&placed).max(col_h(&placed_left));
     let cards_h = if wide {
         main_h.max(side_h)
     } else {
@@ -255,12 +331,20 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
     };
     let cards_y = y0 + art::TITLE_H + 1;
     let bw = MAIN_W.min(area.width.saturating_sub(2));
-    let (main_x, side_x, side_w, side_y0) = if wide && side_h > 0 {
+    let (main_x, left_x, side_x, side_w, side_y0) = if wide3 && side_h > 0 {
+        let gx = area.x + area.width.saturating_sub(MAIN_W + 2 * (GAP + SIDE_W)) / 2;
+        let mx = gx + SIDE_W + GAP;
+        (mx, gx, mx + MAIN_W + GAP, SIDE_W, cards_y)
+    } else if wide && side_h > 0 {
         let gx = area.x + area.width.saturating_sub(MAIN_W + GAP + SIDE_W) / 2;
-        (gx, gx + MAIN_W + GAP, SIDE_W, cards_y)
+        if !placed.is_empty() && placed.iter().all(|&(i, _, _)| s.cards[i].left) {
+            (gx + SIDE_W + GAP, gx, gx, SIDE_W, cards_y)
+        } else {
+            (gx, gx, gx + MAIN_W + GAP, SIDE_W, cards_y)
+        }
     } else {
         let x = area.x + (area.width - bw) / 2;
-        (x, x, bw, cards_y + main_h + 1)
+        (x, x, x, bw, cards_y + main_h + 1)
     };
     // Everything below is clamped to the screen: a pathological config (say,
     // a dozen folded cards on an 18-row terminal) clips instead of panicking.
@@ -272,24 +356,28 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
     }
     .intersection(area);
     let mut side_rects: Vec<(usize, Rect, usize)> = Vec::new();
-    let mut sy = side_y0;
-    for &(i, h, shown) in &placed {
-        side_rects.push((
-            i,
-            Rect {
-                x: side_x,
-                y: sy,
-                width: side_w,
-                height: h,
-            }
-            .intersection(area),
-            shown,
-        ));
-        sy += h + 1;
+    for (col_x, col) in [(left_x, &placed_left), (side_x, &placed)] {
+        let mut sy = side_y0;
+        for &(i, h, shown) in col {
+            side_rects.push((
+                i,
+                Rect {
+                    x: col_x,
+                    y: sy,
+                    width: side_w,
+                    height: h,
+                }
+                .intersection(area),
+                shown,
+            ));
+            sy += h + 1;
+        }
     }
     let hint_y = side_rects
-        .last()
-        .map_or(brect.bottom(), |(_, r, _)| r.bottom().max(brect.bottom()))
+        .iter()
+        .map(|(_, r, _)| r.bottom())
+        .max()
+        .map_or(brect.bottom(), |b| b.max(brect.bottom()))
         + 1;
 
     let ctx = sky::Ctx {
@@ -535,29 +623,36 @@ fn render_side_card(card: &SideCard, shown: usize, rect: Rect, tick: u64, buf: &
     let inner = block.inner(rect);
     block.render(rect, buf);
 
+    let name_w = card
+        .rows
+        .iter()
+        .take(shown)
+        .filter(|r| r.detail.is_some())
+        .map(|r| r.name.chars().count())
+        .max()
+        .unwrap_or(NAME_W)
+        .min(NAME_W);
     let mut lines = vec![Line::default()];
     for (i, r) in card.rows.iter().take(shown).enumerate() {
         let mut spans = vec![Span::raw("  ")];
         let mut used = 2usize;
         if let Some(h) = r.health {
-            let rgb = match h {
-                Health::Bad => HEALTH_BAD,
-                Health::Warn => HEALTH_WARN,
-                Health::Good => HEALTH_GOOD,
+            let fg = match h {
+                Health::Bad => pulse(HEALTH_BAD, tick + i as u64 * 8),
+                Health::Warn => pulse(HEALTH_WARN, tick + i as u64 * 8),
+                Health::Good => pulse(HEALTH_GOOD, tick + i as u64 * 8),
+                Health::Off => SLATE_600,
             };
-            spans.push(Span::styled(
-                "● ",
-                Style::default().fg(pulse(rgb, tick + i as u64 * 8)),
-            ));
+            spans.push(Span::styled("● ", Style::default().fg(fg)));
             used += 2;
         }
         match &r.detail {
             Some(detail) => {
                 spans.push(Span::styled(
-                    format!("{:<NAME_W$} ", truncate(&r.name, NAME_W)),
+                    format!("{:<name_w$} ", truncate(&r.name, name_w)),
                     Style::default().fg(SLATE_400),
                 ));
-                let dw = (inner.width as usize).saturating_sub(used + NAME_W + 1);
+                let dw = (inner.width as usize).saturating_sub(used + name_w + 1);
                 spans.push(Span::styled(
                     truncate(detail, dw),
                     Style::default().fg(SLATE_500),
@@ -565,10 +660,8 @@ fn render_side_card(card: &SideCard, shown: usize, rect: Rect, tick: u64, buf: &
             }
             None => {
                 let w = (inner.width as usize).saturating_sub(used);
-                spans.push(Span::styled(
-                    truncate(&r.name, w),
-                    Style::default().fg(SLATE_400),
-                ));
+                let fg = r.accent.map_or(SLATE_400, |rgb| scale(rgb, 1.0));
+                spans.push(Span::styled(truncate(&r.name, w), Style::default().fg(fg)));
             }
         }
         lines.push(Line::from(spans));

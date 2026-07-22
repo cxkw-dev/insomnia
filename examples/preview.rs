@@ -18,11 +18,13 @@ fn main() {
         health: None,
         name: name.into(),
         detail: None,
+        accent: None,
     };
     let status = |health, name: &str, detail: &str| CardRow {
         health: Some(health),
         name: name.into(),
         detail: Some(detail.into()),
+        accent: None,
     };
 
     let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
@@ -46,6 +48,7 @@ fn main() {
                     plain("#57 tidy the release notes"),
                 ],
                 summary: "2 items".into(),
+                left: false,
             },
             SideCard {
                 title: "docker".into(),
@@ -59,6 +62,7 @@ fn main() {
                     status(Health::Good, "builder", "up 2 hours"),
                 ],
                 summary: "5 running".into(),
+                left: false,
             },
         ],
         sky: vec![true; sky::FLYERS.len()],

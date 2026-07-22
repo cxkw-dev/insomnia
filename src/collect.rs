@@ -10,7 +10,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
 
-use crate::config::CardConfig;
+use crate::config::{accent_rgb, CardConfig};
 use crate::power::PowerStatus;
 
 const BASE_POLL: Duration = Duration::from_secs(10);
@@ -23,6 +23,8 @@ pub enum Health {
     Bad,
     Warn,
     Good,
+    /// Present but dormant — a steady slate dot instead of a pulsing one.
+    Off,
 }
 
 #[derive(Clone, Debug)]
@@ -38,6 +40,8 @@ pub struct CardRow {
     pub health: Option<Health>,
     pub name: String,
     pub detail: Option<String>,
+    /// Section headers (`hdr|accent|text`) carry their accent color here.
+    pub accent: Option<(u8, u8, u8)>,
 }
 
 #[derive(Clone, Debug)]
@@ -145,14 +149,26 @@ fn poll_card(cfg: &CardConfig) -> Option<CardData> {
     Some(CardData { rows })
 }
 
-/// The card row protocol: `ok|name|detail`, `warn|name`, `bad|name|detail`
-/// get a health dot and columns; anything else is a plain text row.
+/// The card row protocol: `ok|name|detail`, `warn|name`, `bad|name|detail`,
+/// and `off|name|detail` get a health dot and columns; `hdr|accent|text` is
+/// a colored section header; anything else is a plain text row.
 fn parse_row(line: &str) -> CardRow {
     let parts: Vec<&str> = line.splitn(3, '|').map(str::trim).collect();
+    if parts.first() == Some(&"hdr") && parts.len() == 3 {
+        if let Some(rgb) = accent_rgb(parts[1]) {
+            return CardRow {
+                health: None,
+                name: parts[2].to_string(),
+                detail: None,
+                accent: Some(rgb),
+            };
+        }
+    }
     let health = match parts.first().copied() {
         Some("ok") => Some(Health::Good),
         Some("warn") => Some(Health::Warn),
         Some("bad") => Some(Health::Bad),
+        Some("off") => Some(Health::Off),
         _ => None,
     };
     match health {
@@ -163,11 +179,13 @@ fn parse_row(line: &str) -> CardRow {
                 .get(2)
                 .filter(|d| !d.is_empty())
                 .map(|d| d.to_string()),
+            accent: None,
         },
         _ => CardRow {
             health: None,
             name: line.trim().to_string(),
             detail: None,
+            accent: None,
         },
     }
 }
@@ -186,6 +204,26 @@ mod tests {
         let r = parse_row("bad|worker");
         assert_eq!(r.health, Some(Health::Bad));
         assert_eq!(r.detail, None);
+    }
+
+    #[test]
+    fn header_rows_take_an_accent() {
+        let r = parse_row("hdr|coral|✻ claude");
+        assert_eq!(r.health, None);
+        assert_eq!(r.accent, Some((217, 119, 87)));
+        assert_eq!(r.name, "✻ claude");
+
+        // An unknown accent falls back to a plain text row.
+        let r = parse_row("hdr|mauve|x");
+        assert_eq!(r.accent, None);
+        assert_eq!(r.name, "hdr|mauve|x");
+    }
+
+    #[test]
+    fn off_rows_are_dormant() {
+        let r = parse_row("off|work|not logged in");
+        assert_eq!(r.health, Some(Health::Off));
+        assert_eq!(r.detail.as_deref(), Some("not logged in"));
     }
 
     #[test]

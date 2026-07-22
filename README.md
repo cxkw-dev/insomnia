@@ -114,11 +114,15 @@ Each one runs a shell command on a timer and turns its stdout into rows:
 | `command` | yes | — | run via `sh -c` every `interval` seconds |
 | `interval` | no | `10` | seconds between runs (minimum 2) |
 | `glyph` | no | `◆` | a single-width character beside the title |
-| `accent` | no | `violet` | `violet` `pink` `sky` `blue` `emerald` `gold` `red` `slate` |
+| `accent` | no | `violet` | `violet` `pink` `sky` `blue` `emerald` `gold` `red` `slate` `coral` `teal` |
+| `side` | no | `right` | `left` floats the card to the left of the status card when the terminal fits three columns |
 
 The row protocol: **each line of stdout is one row.** Plain text renders
 as-is. Lines shaped `ok|name|detail`, `warn|name|detail`, or `bad|name|detail`
-get a pulsing health dot and aligned columns — the detail is optional. A card
+get a pulsing health dot and aligned columns — the detail is optional, and
+`off|name|detail` gives a steady slate dot for rows that are present but
+dormant. A line shaped `hdr|accent|text` becomes a section header tinted
+with that accent, for cards that group rows from several sources. A card
 shows at most 32 rows, and only appears at all when its command succeeds and
 prints something, so a quiet source costs you nothing.
 
@@ -126,6 +130,17 @@ Layout takes care of itself: cards sail beside the status card on a wide
 terminal, dock beneath it on a narrow one, and any card that doesn't fit the
 height folds into a one-line summary inside the status card. A truly tiny
 terminal gets a single-line compact mode, ufo included.
+
+Prefer one box to many? A `[dashboard]` table with `combined = true` folds
+every card — custom and docker alike — into a single box, each as a section
+under a header in that card's glyph and accent. `title`, `glyph`, `accent`,
+and `side` then describe the combined box itself:
+
+```toml
+[dashboard]
+combined = true
+side = "left"
+```
 
 Some cards worth stealing:
 

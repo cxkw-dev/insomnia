@@ -113,6 +113,21 @@ pub struct FileConfig {
     /// `[[card]]` blocks — custom dashboard cards fed by shell commands.
     #[serde(rename = "card")]
     pub cards: Vec<CardConfig>,
+    pub dashboard: DashboardConfig,
+}
+
+/// The `[dashboard]` table. `combined = true` folds every card — custom and
+/// docker alike — into one box, each as a section under a header in that
+/// card's glyph and accent. Title, glyph, accent, and side then describe the
+/// combined box itself.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DashboardConfig {
+    pub combined: bool,
+    pub title: Option<String>,
+    pub glyph: Option<String>,
+    pub accent: Option<String>,
+    pub side: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -128,8 +143,10 @@ impl Default for DockerConfig {
 }
 
 /// One custom dashboard card. `command` runs through `sh -c` on `interval`
-/// seconds; each stdout line becomes a row. Lines may be plain text, or
-/// `ok|name|detail` / `warn|…` / `bad|…` for a health-dotted two-column row.
+/// seconds; each stdout line becomes a row. Lines may be plain text,
+/// `ok|name|detail` / `warn|…` / `bad|…` / `off|…` for a health-dotted
+/// two-column row, or `hdr|accent|text` for a section header in that
+/// accent's color.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CardConfig {
@@ -141,6 +158,10 @@ pub struct CardConfig {
     pub interval: u64,
     #[serde(default)]
     pub accent: Option<String>,
+    /// `"left"` floats the card to the left of the status card when the
+    /// terminal is wide enough for three columns; the default is `"right"`.
+    #[serde(default)]
+    pub side: Option<String>,
 }
 
 fn default_interval() -> u64 {
@@ -157,6 +178,8 @@ pub const ACCENTS: &[(&str, (u8, u8, u8))] = &[
     ("gold", (251, 191, 36)),
     ("red", (248, 113, 113)),
     ("slate", (148, 163, 184)),
+    ("coral", (217, 119, 87)),
+    ("teal", (16, 163, 127)),
 ];
 
 pub fn accent_rgb(name: &str) -> Option<(u8, u8, u8)> {
@@ -201,6 +224,28 @@ fn parse_file(text: &str) -> Result<FileConfig, String> {
                     known.join(", ")
                 ));
             }
+        }
+        if let Some(sd) = &card.side {
+            if sd != "left" && sd != "right" {
+                return Err(format!(
+                    "card '{}': unknown side '{sd}' (left or right)",
+                    card.title
+                ));
+            }
+        }
+    }
+    if let Some(a) = &cfg.dashboard.accent {
+        if accent_rgb(a).is_none() {
+            let known: Vec<&str> = ACCENTS.iter().map(|(n, _)| *n).collect();
+            return Err(format!(
+                "[dashboard]: unknown accent '{a}' (try one of {})",
+                known.join(", ")
+            ));
+        }
+    }
+    if let Some(sd) = &cfg.dashboard.side {
+        if sd != "left" && sd != "right" {
+            return Err(format!("[dashboard]: unknown side '{sd}' (left or right)"));
         }
     }
     for key in cfg.sky.keys() {
