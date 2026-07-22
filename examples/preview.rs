@@ -50,6 +50,24 @@ fn main() {
                 summary: "2 items".into(),
                 left: false,
             },
+            // Mirrors the ai-usage card: long account names and details wide
+            // enough to force the box past SIDE_W.
+            SideCard {
+                title: "ai usage".into(),
+                glyph: "✦".into(),
+                accent: (148, 163, 184),
+                rows: vec![
+                    plain("✻ claude"),
+                    status(Health::Good, "▸ cxkw.dev", "5h 9% · wk 42%"),
+                    plain("◎ openai codex"),
+                    status(Health::Warn, "▸ cxkw.dev", "pro · 5h 12% · wk 78%"),
+                    status(Health::Off, "  andy.nguyen", "not logged in"),
+                    plain("⧉ copilot"),
+                    status(Health::Good, "▸ andy-nguyen-cxkw", "biz · unlimited"),
+                ],
+                summary: "7 items".into(),
+                left: true,
+            },
             SideCard {
                 title: "docker".into(),
                 glyph: "≋".into(),

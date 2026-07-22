@@ -33,6 +33,8 @@ use crate::theme::{
 
 const MAIN_W: u16 = 46;
 const SIDE_W: u16 = 40;
+/// Side cards grow past [`SIDE_W`] to fit their longest row, up to this.
+const SIDE_MAX_W: u16 = 64;
 const GAP: u16 = 2;
 /// Widest the name column may grow when a row has a detail column; cards
 /// with shorter names shrink the column so details get the leftover room.
@@ -331,20 +333,39 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
     };
     let cards_y = y0 + art::TITLE_H + 1;
     let bw = MAIN_W.min(area.width.saturating_sub(2));
+    // The side column widens past SIDE_W to hold its longest row whole —
+    // capped by SIDE_MAX_W and by the room this layout actually has — so
+    // usage details never get clipped just because the box was born narrow.
+    let room = if wide3 {
+        area.width.saturating_sub(MAIN_W + 2 * GAP + 2) / 2
+    } else if wide {
+        area.width.saturating_sub(MAIN_W + GAP + 2)
+    } else {
+        area.width.saturating_sub(2)
+    };
+    let sw = s
+        .cards
+        .iter()
+        .map(natural_width)
+        .max()
+        .unwrap_or(SIDE_W)
+        .clamp(SIDE_W, SIDE_MAX_W)
+        .min(room);
     let (main_x, left_x, side_x, side_w, side_y0) = if wide3 && side_h > 0 {
-        let gx = area.x + area.width.saturating_sub(MAIN_W + 2 * (GAP + SIDE_W)) / 2;
-        let mx = gx + SIDE_W + GAP;
-        (mx, gx, mx + MAIN_W + GAP, SIDE_W, cards_y)
+        let gx = area.x + area.width.saturating_sub(MAIN_W + 2 * (GAP + sw)) / 2;
+        let mx = gx + sw + GAP;
+        (mx, gx, mx + MAIN_W + GAP, sw, cards_y)
     } else if wide && side_h > 0 {
-        let gx = area.x + area.width.saturating_sub(MAIN_W + GAP + SIDE_W) / 2;
+        let gx = area.x + area.width.saturating_sub(MAIN_W + GAP + sw) / 2;
         if !placed.is_empty() && placed.iter().all(|&(i, _, _)| s.cards[i].left) {
-            (gx + SIDE_W + GAP, gx, gx, SIDE_W, cards_y)
+            (gx + sw + GAP, gx, gx, sw, cards_y)
         } else {
-            (gx, gx, gx + MAIN_W + GAP, SIDE_W, cards_y)
+            (gx, gx, gx + MAIN_W + GAP, sw, cards_y)
         }
     } else {
         let x = area.x + (area.width - bw) / 2;
-        (x, x, x, bw, cards_y + main_h + 1)
+        let sx = area.x + area.width.saturating_sub(sw) / 2;
+        (x, x, sx, sw, cards_y + main_h + 1)
     };
     // Everything below is clamped to the screen: a pathological config (say,
     // a dozen folded cards on an 18-row terminal) clips instead of panicking.
@@ -587,6 +608,34 @@ fn badges(s: &ViewState) -> Line<'static> {
         spans.push(Span::raw("  "));
     }
     Line::from(spans)
+}
+
+/// The width [`render_side_card`] needs to show every row of `card` whole:
+/// borders and indent, the health dot, the shared name column, and the
+/// longest detail — or the title line, whichever is wider.
+fn natural_width(card: &SideCard) -> u16 {
+    let name_w = card
+        .rows
+        .iter()
+        .filter(|r| r.detail.is_some())
+        .map(|r| r.name.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(NAME_W);
+    let body = card
+        .rows
+        .iter()
+        .map(|r| {
+            let dot = if r.health.is_some() { 2 } else { 0 };
+            match &r.detail {
+                Some(d) => dot + name_w + 1 + d.chars().count(),
+                None => dot + r.name.chars().count(),
+            }
+        })
+        .max()
+        .unwrap_or(0);
+    let title = card.glyph.chars().count() + card.title.chars().count() + 8;
+    (body + 4).max(title) as u16
 }
 
 /// One dashboard card: an accent-tinted box titled with a glyph and count,
