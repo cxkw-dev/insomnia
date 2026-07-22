@@ -201,6 +201,7 @@ schedules:
 
 | flyer | what it does |
 |-------|--------------|
+| `mothership` | a vast violet carrier, high and slow on so long an orbit that most nights never see it — green running lights ripple down its spine when you do |
 | `comets` | three of them — two ice-blue, one golden — streaking on long offset orbits |
 | `ufo` | drifts behind the title, tractor beam flickering on and off |
 | `scouts` | a vee of pink saucers; every few passes the leader rakes a scanning beam below |

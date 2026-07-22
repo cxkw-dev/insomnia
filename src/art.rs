@@ -13,56 +13,92 @@ pub const TITLE_H: u16 = 6;
 // --- Pixel sprites: one char = one pixel, two rows per terminal cell. ---
 // '.' is transparent; every other char maps through the sprite's palette.
 
-// Saucer with a glass dome, amber running lights, and a dithered tractor
-// beam. Rows 0-5 are the ship; the beam rows render only when it flickers on.
-pub const UFO_PX: [&str; 10] = [
-    "...dddd...",
-    "..dhhhhd..",
-    ".mmmmmmmm.",
-    "mymmyymmym",
-    ".mmmmmmmm.",
-    "..mmmmmm..",
-    "....bb....",
-    "...b.bb...",
-    "...bb.b...",
-    "..b.bb.bb.",
+// Saucer: cyan glass dome with a highlight, a steel disc shaded dark at the
+// rim, and a marquee of running lights around the waist — the A/B palettes
+// swap amber and cyan so the lights appear to rotate. Rows 0-5 are the ship;
+// the dithered tractor-beam cone renders only when it flickers on.
+pub const UFO_PX: [&str; 11] = [
+    ".....dhhd.....",
+    "....dhhhhd....",
+    "..ssmmmmmmss..",
+    "smyLmyLmyLmyms",
+    ".ssmmmmmmmmss.",
+    "...ssssssss...",
+    "......gg......",
+    ".....g.gg.....",
+    ".....gg.g.....",
+    "....g.gg.gg...",
+    "...gg..g..g...",
 ];
-pub const UFO_MAP: &[(char, (u8, u8, u8))] = &[
+pub const UFO_MAP_A: &[(char, (u8, u8, u8))] = &[
     ('d', (34, 211, 238)),
     ('h', (207, 250, 254)),
     ('m', (148, 163, 184)),
+    ('s', (71, 85, 105)),
     ('y', (251, 191, 36)),
-    ('b', (103, 232, 249)),
+    ('L', (22, 78, 99)),
+    ('g', (103, 232, 249)),
+];
+pub const UFO_MAP_B: &[(char, (u8, u8, u8))] = &[
+    ('d', (34, 211, 238)),
+    ('h', (207, 250, 254)),
+    ('m', (148, 163, 184)),
+    ('s', (71, 85, 105)),
+    ('y', (100, 76, 14)),
+    ('L', (103, 232, 249)),
+    ('g', (103, 232, 249)),
 ];
 
-// Alien raider: an emerald dart flying nose-left with a red cockpit slit and
-// twin engine flames ('f' recolors per frame). It fires paired crimson laser
-// bolts from the nose — the bolts themselves are drawn by the UI, not here.
-pub const RAIDER_PX: [&str; 6] = [
-    "....ee",
-    "..eehhee",
-    "eehhcchheeeeff",
-    "eehhcchheeeeff",
-    "..eehhee",
-    "....ee",
+// Alien raider: a swept-wing emerald interceptor flying nose-left — glowing
+// cannon tip, red cockpit slit, dark hull with a bright leading edge, slate
+// engine pods trailing flame. Frame B stretches the flame a pixel and the
+// maps recolor it, so the exhaust both flickers and breathes. It fires
+// paired crimson laser bolts from the nose — those are drawn by the UI.
+pub const RAIDER_PX_A: [&str; 6] = [
+    ".........eee.......",
+    "....eehEEEEEee.....",
+    "wchhEEEEEEEEEEppff.",
+    "wchhEEEEEEEEEEppff.",
+    "....eehEEEEEee.....",
+    ".........eee.......",
+];
+pub const RAIDER_PX_B: [&str; 6] = [
+    ".........eee.......",
+    "....eehEEEEEee.....",
+    "wchhEEEEEEEEEEppfff",
+    "wchhEEEEEEEEEEppfff",
+    "....eehEEEEEee.....",
+    ".........eee.......",
 ];
 pub const RAIDER_MAP_A: &[(char, (u8, u8, u8))] = &[
-    ('e', (5, 150, 105)),
-    ('h', (110, 231, 183)),
+    ('E', (4, 120, 87)),
+    ('e', (52, 211, 153)),
+    ('h', (167, 243, 208)),
     ('c', (248, 113, 113)),
+    ('w', (254, 202, 202)),
+    ('p', (51, 65, 85)),
     ('f', (251, 191, 36)),
 ];
 pub const RAIDER_MAP_B: &[(char, (u8, u8, u8))] = &[
-    ('e', (5, 150, 105)),
-    ('h', (110, 231, 183)),
+    ('E', (4, 120, 87)),
+    ('e', (52, 211, 153)),
+    ('h', (167, 243, 208)),
     ('c', (248, 113, 113)),
+    ('w', (254, 202, 202)),
+    ('p', (51, 65, 85)),
     ('f', (96, 165, 250)),
 ];
 
-// Pink scout saucer: gold canopy lights over a squat hull. Three of them fly
-// in a loose vee; the leader rakes a dashed scanning beam below (UI-drawn).
-pub const SCOUT_PX: [&str; 3] = ["..hh", "pphhpp", ".pppp"];
-pub const SCOUT_MAP: &[(char, (u8, u8, u8))] = &[('p', (244, 114, 182)), ('h', (253, 224, 71))];
+// Pink scout saucer: a gold canopy over a two-tone hull — bright pink on
+// top, deep magenta below — with a pair of amber landing lights underneath.
+// Three fly in a loose vee; the leader rakes a scanning beam (UI-drawn).
+pub const SCOUT_PX: [&str; 4] = ["...hh...", ".pphhpp.", "pPPPPPPp", "..y..y.."];
+pub const SCOUT_MAP: &[(char, (u8, u8, u8))] = &[
+    ('p', (244, 114, 182)),
+    ('P', (219, 39, 119)),
+    ('h', (253, 224, 71)),
+    ('y', (251, 191, 36)),
+];
 
 // The docker whale, refitted as a cargo freighter: five crate-colored
 // containers on a dark deck strip, a shaded back over a light belly, an eye,
@@ -122,25 +158,63 @@ pub const WHALE_MAP_B: &[(char, (u8, u8, u8))] = &[
     ('o', (125, 211, 252)),
 ];
 
-// Side-view ship: red fin stripe, cyan cockpit, exhaust flame ('f' recolors
-// per frame for the flicker).
-pub const ROCKET_PX: [&str; 4] = [
-    "...Fmmmmmm..",
-    "ff.Fmmccmmnn",
-    ".ffFmmccmmnn",
-    "...Fmmmmmm..",
+// The hero rocket, nose-right: white hull shaded slate along the spine, a
+// framed cyan porthole, red tail fins, and a tapering red nose cone. The
+// exhaust has a pale-gold core ('x') inside an outer flame ('f') that the
+// two maps flip between orange and red for the flicker.
+pub const ROCKET_PX: [&str; 6] = [
+    "......smmmmmms.....",
+    "ff..FFmmWWmmmmn....",
+    "fffxFFmWccWmmmmnnn.",
+    ".ffxFFmWccWmmmmnnn.",
+    "f...FFmmWWmmmmn....",
+    "......smmmmmms.....",
 ];
 pub const ROCKET_MAP_A: &[(char, (u8, u8, u8))] = &[
     ('m', (226, 232, 240)),
+    ('s', (148, 163, 184)),
+    ('W', (248, 250, 252)),
     ('c', (103, 232, 249)),
     ('F', (220, 80, 80)),
     ('n', (239, 68, 68)),
     ('f', (251, 146, 60)),
+    ('x', (254, 240, 138)),
 ];
 pub const ROCKET_MAP_B: &[(char, (u8, u8, u8))] = &[
     ('m', (226, 232, 240)),
+    ('s', (148, 163, 184)),
+    ('W', (248, 250, 252)),
     ('c', (103, 232, 249)),
     ('F', (220, 80, 80)),
     ('n', (239, 68, 68)),
     ('f', (248, 113, 113)),
+    ('x', (254, 240, 138)),
+];
+
+// The mothership: a vast violet crescent-carrier that crosses only rarely,
+// high and slow. A deep hull under a lighter rim, a keel in shadow with
+// hanging spires, and a spine of green portholes whose A/B palettes swap
+// bright and dim so the lights ripple down the hull.
+pub const MOTHERSHIP_PX: [&str; 7] = [
+    "..........vvvvvvvv..........",
+    ".....vvvvVVVVVVVVvvvv.......",
+    "..vvVVVVVVVVVVVVVVVVVvv.....",
+    ".vVgGVVgGVVgGVVgGVVgGVVgGVv.",
+    "..vVVVVVVVVVVVVVVVVVVVVVv...",
+    "....ssssssssssssssssssss....",
+    "......s...s....s...s...s....",
+];
+pub const MOTHERSHIP_MAP_A: &[(char, (u8, u8, u8))] = &[
+    ('v', (139, 92, 246)),
+    ('V', (91, 33, 182)),
+    ('s', (51, 65, 85)),
+    ('g', (74, 222, 128)),
+    ('G', (22, 101, 52)),
+];
+pub const MOTHERSHIP_MAP_B: &[(char, (u8, u8, u8))] = &[
+    ('v', (139, 92, 246)),
+    ('V', (91, 33, 182)),
+    ('s', (51, 65, 85)),
+    ('g', (22, 101, 52)),
+    ('G', (74, 222, 128)),
 ];

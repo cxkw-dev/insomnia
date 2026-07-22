@@ -49,6 +49,11 @@ pub struct Flyer {
 /// Every flyer in the sky, in draw order. This is the one list to extend.
 pub const FLYERS: &[Flyer] = &[
     Flyer {
+        name: "mothership",
+        layer: Layer::Behind,
+        draw: mothership,
+    },
+    Flyer {
         name: "comets",
         layer: Layer::Behind,
         draw: comets,
@@ -314,7 +319,7 @@ fn comets(ctx: &Ctx, buf: &mut Buffer) {
 }
 
 // The saucer drifts right-to-left near the top, passing behind the title,
-// its tractor beam flickering on and off as it flies.
+// marquee lights rotating, its tractor beam flickering on and off.
 fn ufo(ctx: &Ctx, buf: &mut Buffer) {
     let (tick, area) = (ctx.tick, ctx.area);
     if area.width < 30 {
@@ -329,7 +334,12 @@ fn ufo(ctx: &Ctx, buf: &mut Buffer) {
     } else {
         &art::UFO_PX
     };
-    pixel::draw_px_art(rows, art::UFO_MAP, x, y, 0.7, area, buf);
+    let map = if (tick / 8) % 2 == 0 {
+        art::UFO_MAP_A
+    } else {
+        art::UFO_MAP_B
+    };
+    pixel::draw_px_art(rows, map, x, y, 0.7, area, buf);
 }
 
 // A vee of pink scout saucers sweeps left-to-right along the top; every few
@@ -342,7 +352,7 @@ fn scouts(ctx: &Ctx, buf: &mut Buffer) {
     let period = area.width as u64 + 90;
     let x = area.x as i32 + ((tick / 3 + 57) % period) as i32 - 30;
     let y = area.y as i32 + 2;
-    for (dx, dy, phase) in [(0, 0, 0u64), (-9, 1, 8), (9, 1, 16)] {
+    for (dx, dy, phase) in [(0, 0, 0u64), (-11, 1, 8), (11, 1, 16)] {
         let bob = ((tick / 12 + phase) % 2) as i32;
         pixel::draw_px_art(
             &art::SCOUT_PX,
@@ -356,8 +366,8 @@ fn scouts(ctx: &Ctx, buf: &mut Buffer) {
     }
     // The scanning beam: dashed pink, the gaps flowing downward as it sweeps.
     if (tick / 48) % 4 == 0 {
-        let bx = x + 2;
-        let py0 = y * 2 + 6;
+        let bx = x + 3;
+        let py0 = y * 2 + 8;
         for k in 0..12i32 {
             if (k + (tick / 2) as i32) % 3 != 0 {
                 let fade = 1.0 - k as f32 * 0.07;
@@ -386,12 +396,12 @@ fn raider(ctx: &Ctx, buf: &mut Buffer) {
     let pos = period - (tick / 3) % period;
     let x = area.x as i32 + pos as i32 - 40;
     let y = y_cell + ((tick / 14) % 2) as i32;
-    let map = if (tick / 2) % 2 == 0 {
-        art::RAIDER_MAP_A
+    let (rows, map) = if (tick / 2) % 2 == 0 {
+        (&art::RAIDER_PX_A, art::RAIDER_MAP_A)
     } else {
-        art::RAIDER_MAP_B
+        (&art::RAIDER_PX_B, art::RAIDER_MAP_B)
     };
-    pixel::draw_px_art(&art::RAIDER_PX, map, x, y, 0.95, area, buf);
+    pixel::draw_px_art(rows, map, x, y, 0.95, area, buf);
 
     // Bolts spawn at the nose and outrun the ship at 3px a tick, white-hot at
     // the head and cooling to ember through the tail. Fire only while the
@@ -455,4 +465,27 @@ fn rocket(ctx: &Ctx, buf: &mut Buffer) {
         art::ROCKET_MAP_B
     };
     pixel::draw_px_art(&art::ROCKET_PX, map, x0, y as i32, 1.0, area, buf);
+}
+
+// The mothership: right-to-left along the very top, so slow it barely moves,
+// and on so long a cycle that most passes of the sky never see it. Running
+// lights ripple green down the spine while it's here.
+fn mothership(ctx: &Ctx, buf: &mut Buffer) {
+    let (tick, area) = (ctx.tick, ctx.area);
+    if area.width < 60 {
+        return;
+    }
+    let period = area.width as u64 * 3 + 200;
+    let pos = period - (tick / 7) % period;
+    let x = area.x as i32 + pos as i32 - 30;
+    if x > area.right() as i32 {
+        return;
+    }
+    let y = area.y as i32;
+    let map = if (tick / 10) % 2 == 0 {
+        art::MOTHERSHIP_MAP_A
+    } else {
+        art::MOTHERSHIP_MAP_B
+    };
+    pixel::draw_px_art(&art::MOTHERSHIP_PX, map, x, y, 0.55, area, buf);
 }
