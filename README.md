@@ -132,14 +132,13 @@ height folds into a one-line summary inside the status card. A truly tiny
 terminal gets a single-line compact mode, ufo included.
 
 Prefer one box to many? A `[dashboard]` table with `combined = true` folds
-every card — custom and docker alike — into a single box, each as a section
-under a header in that card's glyph and accent. `title`, `glyph`, `accent`,
-and `side` then describe the combined box itself:
+every card — custom and docker alike — into the status box itself, each as
+a section under a header in that card's glyph and accent, so the whole app
+is a single box that grows to fit its widest row:
 
 ```toml
 [dashboard]
 combined = true
-side = "left"
 ```
 
 Some cards worth stealing:
