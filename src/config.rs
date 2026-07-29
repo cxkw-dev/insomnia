@@ -108,7 +108,7 @@ pub fn parse<I: Iterator<Item = String>>(mut args: I) -> Result<Outcome, String>
 #[serde(default, deny_unknown_fields)]
 pub struct FileConfig {
     pub docker: DockerConfig,
-    /// `[sky]` — per-flyer toggles, e.g. `raider = false`. Unlisted = on.
+    /// `[sky]` — per-flyer toggles, e.g. `comets = false`. Unlisted = on.
     pub sky: HashMap<String, bool>,
     /// `[[card]]` blocks — custom dashboard cards fed by shell commands.
     #[serde(rename = "card")]
@@ -372,7 +372,7 @@ pub fn help() -> String {
 {dim}with no flags, insomnia runs as -d -i: display and system stay awake.
 quit with q, esc, or ctrl-c — power assertions release instantly.
 the config file adds dashboard cards (docker, or any shell command)
-and toggles the ships in the sky — see the readme for the format.{r}
+and toggles the sky's comets and shooting stars — see the readme.{r}
 ",
         env!("CARGO_PKG_VERSION")
     )
@@ -413,7 +413,7 @@ mod tests {
 enabled = false
 
 [sky]
-raider = false
+comets = false
 
 [[card]]
 title = "todos"
@@ -425,7 +425,7 @@ interval = 30
         )
         .unwrap();
         assert!(!cfg.docker.enabled);
-        assert_eq!(cfg.sky.get("raider"), Some(&false));
+        assert_eq!(cfg.sky.get("comets"), Some(&false));
         assert_eq!(cfg.cards.len(), 1);
         assert_eq!(cfg.cards[0].interval, 30);
     }
