@@ -119,7 +119,8 @@ pub struct FileConfig {
 /// The `[dashboard]` table. `combined = true` folds every card — custom and
 /// docker alike — into the status box itself, each as a section under a
 /// header in that card's glyph and accent, so the whole app is one box.
-/// Title, glyph, accent, and side are then unused.
+/// The box expands responsively up to the renderer's comfortable reading
+/// width. Title, glyph, accent, and side are then unused.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DashboardConfig {
