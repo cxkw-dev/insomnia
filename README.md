@@ -266,10 +266,14 @@ only ever delays its own card; the animation never stutters.
 ## Development
 
 ```sh
-cargo run                                # the real thing
-cargo test                               # config parsing, durations, row protocol
-cargo run --example preview 110 46 7     # one headless frame: <width> <height> <tick>
+make run       # the real thing, from the working tree
+make check     # fmt + clippy + tests
+make preview   # one headless frame (cargo run --example preview <w> <h> <tick>)
+make install   # rebuild and replace the installed binary
 ```
+
+The `insomnia` on your PATH is the installed copy — code changes don't reach
+it until `make install` (or `cargo install --path .`) rebuilds it.
 
 ## License
 
