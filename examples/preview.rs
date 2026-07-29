@@ -2,10 +2,11 @@
 // layout without a live terminal: cargo run --example preview [width height tick]
 use std::time::Duration;
 
+use insomnia::cards::SideCard;
 use insomnia::collect::{CardRow, Health};
 use insomnia::power::{Kind, PowerStatus};
 use insomnia::sky;
-use insomnia::ui::{draw, SideCard, ViewState};
+use insomnia::ui::{draw, ViewState};
 use ratatui::{backend::TestBackend, Terminal};
 
 fn main() {
@@ -15,44 +16,32 @@ fn main() {
     let tick: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(7);
 
     let plain = |name: &str| CardRow {
-        health: None,
         name: name.into(),
-        detail: None,
-        accent: None,
-        section: false,
-        percent: None,
+        ..CardRow::default()
     };
     let status = |health, name: &str, detail: &str| CardRow {
         health: Some(health),
         name: name.into(),
         detail: Some(detail.into()),
-        accent: None,
-        section: false,
-        percent: None,
+        ..CardRow::default()
     };
     let hdr = |accent: (u8, u8, u8), name: &str| CardRow {
-        health: None,
         name: name.into(),
-        detail: None,
         accent: Some(accent),
         section: true,
-        percent: None,
+        ..CardRow::default()
     };
     let group = |accent: (u8, u8, u8), name: &str| CardRow {
-        health: None,
         name: name.into(),
-        detail: None,
         accent: Some(accent),
-        section: false,
-        percent: None,
+        ..CardRow::default()
     };
     let bar = |accent: (u8, u8, u8), name: &str, percent, detail: &str| CardRow {
-        health: None,
         name: name.into(),
         detail: Some(detail.into()),
         accent: Some(accent),
-        section: false,
         percent: Some(percent),
+        ..CardRow::default()
     };
 
     let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
@@ -91,7 +80,11 @@ fn main() {
                 hdr((16, 163, 127), "◎ openai codex"),
                 status(Health::Bad, "▸ cxkw.dev", "pro · 96% used · active"),
                 bar((16, 163, 127), "weekly", 96, "resets Mon 09:00"),
-                status(Health::Warn, "  andy.nguyen", "business · 95% used · stale 1d"),
+                status(
+                    Health::Warn,
+                    "  andy.nguyen",
+                    "business · 95% used · stale 1d",
+                ),
                 bar((16, 163, 127), "monthly credits", 95, "resets Fri 19:00"),
                 plain(""),
                 hdr((167, 139, 250), "⧉ copilot"),

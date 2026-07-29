@@ -1,6 +1,6 @@
-//! The TUI: terminal setup, the render loop, and the card layout — a status
-//! card plus any dashboard cards (docker and custom command cards), floating
-//! over the sky rendered by [`crate::sky`].
+//! The TUI: terminal setup, the render loop, and the layout — a status card
+//! plus the dashboard cards built by [`crate::cards`], floating over the sky
+//! rendered by [`crate::sky`].
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -22,13 +22,14 @@ use ratatui::{
 };
 
 use crate::art;
-use crate::collect::{self, CardData, CardRow, Container, Health, Update};
-use crate::config::{accent_rgb, CardConfig, Config, DashboardConfig, FileConfig};
+use crate::cards::{self, SideCard};
+use crate::collect::{self, CardData, Container, Health, Update};
+use crate::config::{Config, FileConfig};
 use crate::power::{Kind, PowerStatus};
 use crate::sky;
 use crate::theme::{
-    gradient, gradient_rgb, pulse, scale, tri, AMBER, EMERALD, GOLD, HEALTH_BAD, HEALTH_GOOD,
-    HEALTH_WARN, RED, SLATE_400, SLATE_500, SLATE_600, SLATE_700, TEXT, VIOLET_LIGHT,
+    gradient, gradient_rgb, pulse, scale, tri, AMBER, EMERALD, GOLD, RED, SLATE_400, SLATE_500,
+    SLATE_600, SLATE_700, TEXT, VIOLET_LIGHT,
 };
 
 const MAIN_W: u16 = 64;
@@ -37,12 +38,6 @@ const SIDE_W: u16 = 40;
 /// Side cards grow past [`SIDE_W`] to fit their longest row, up to this.
 const SIDE_MAX_W: u16 = 64;
 const GAP: u16 = 2;
-/// Widest the name column may grow when a row has a detail column; cards
-/// with shorter names shrink the column so details get the leftover room.
-const NAME_W: usize = 21;
-const DEFAULT_GLYPH: &str = "◆";
-const DEFAULT_ACCENT: (u8, u8, u8) = (167, 139, 250);
-const DOCKER_ACCENT: (u8, u8, u8) = (59, 130, 246);
 
 /// Everything the renderer needs for one frame.
 pub struct ViewState {
@@ -59,20 +54,6 @@ pub struct ViewState {
     pub merged: bool,
     /// Per-flyer sky toggles, aligned with [`sky::FLYERS`].
     pub sky: Vec<bool>,
-}
-
-/// A dashboard card ready to render.
-pub struct SideCard {
-    pub title: String,
-    pub glyph: String,
-    pub accent: (u8, u8, u8),
-    pub rows: Vec<CardRow>,
-    /// One-line stand-in shown inside the status card when this card
-    /// doesn't fit the terminal.
-    pub summary: String,
-    /// Floats left of the status card when the terminal fits three columns;
-    /// otherwise the card flows with the right-hand stack.
-    pub left: bool,
 }
 
 pub fn run(cfg: &Config, kinds: &[Kind], fc: &FileConfig) -> io::Result<Duration> {
@@ -115,7 +96,7 @@ pub fn run(cfg: &Config, kinds: &[Kind], fc: &FileConfig) -> io::Result<Duration
             remaining: deadline.map(|d| d.saturating_duration_since(now)),
             kinds: kinds.to_vec(),
             power: power.clone(),
-            cards: build_cards(&fc.cards, &docker, &card_data, &fc.dashboard),
+            cards: cards::build_cards(&fc.cards, &docker, &card_data, &fc.dashboard),
             merged: fc.dashboard.combined,
             sky: sky_on.clone(),
         };
@@ -146,129 +127,6 @@ pub fn run(cfg: &Config, kinds: &[Kind], fc: &FileConfig) -> io::Result<Duration
 fn restore_terminal() -> io::Result<()> {
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen, cursor::Show)
-}
-
-/// A blank line above every section header but the first, so a card built
-/// from several sources — the ai usage card's one section per service —
-/// reads as separate blocks instead of one dense list. The spacing lands in
-/// the row list itself rather than at render time, because every height
-/// budget here is counted in rows: a line conjured during drawing would be
-/// one the layout never reserved, and the card would quietly lose its last
-/// row to make room.
-fn space_sections(rows: &[CardRow]) -> Vec<CardRow> {
-    let mut out: Vec<CardRow> = Vec::with_capacity(rows.len() + 4);
-    for r in rows {
-        let blank_above = r.section && !out.is_empty() && !out.last().is_some_and(is_blank);
-        if blank_above {
-            out.push(CardRow {
-                health: None,
-                name: String::new(),
-                detail: None,
-                accent: None,
-                section: false,
-                percent: None,
-            });
-        }
-        out.push(r.clone());
-    }
-    out
-}
-
-/// A spacer row: no dot, no text, no meter — just vertical room.
-fn is_blank(r: &CardRow) -> bool {
-    r.health.is_none() && r.percent.is_none() && !r.section && r.name.trim().is_empty()
-}
-
-/// Assemble the render-ready card list: custom cards in config order, docker
-/// last. Cards with no data (source down) or no rows simply don't exist.
-/// With `[dashboard] combined = true` the survivors fold into one card, each
-/// as a section under its own glyph-and-accent header; [`draw`] then renders
-/// that card's rows inside the status box, so everything is one box.
-fn build_cards(
-    configs: &[CardConfig],
-    docker: &Option<Vec<Container>>,
-    data: &[Option<CardData>],
-    dash: &DashboardConfig,
-) -> Vec<SideCard> {
-    let mut out = Vec::new();
-    for (cfg, latest) in configs.iter().zip(data) {
-        let Some(d) = latest else { continue };
-        if d.rows.is_empty() {
-            continue;
-        }
-        out.push(SideCard {
-            title: cfg.title.clone(),
-            glyph: cfg.glyph.clone().unwrap_or_else(|| DEFAULT_GLYPH.into()),
-            accent: cfg
-                .accent
-                .as_deref()
-                .and_then(accent_rgb)
-                .unwrap_or(DEFAULT_ACCENT),
-            rows: space_sections(&d.rows),
-            summary: format!("{} items", d.rows.len()),
-            left: cfg.side.as_deref() == Some("left"),
-        });
-    }
-    if let Some(containers) = docker {
-        if !containers.is_empty() {
-            out.push(SideCard {
-                title: "docker".into(),
-                glyph: "≋".into(),
-                accent: DOCKER_ACCENT,
-                rows: containers
-                    .iter()
-                    .map(|c| CardRow {
-                        health: Some(c.health),
-                        name: c.name.clone(),
-                        detail: Some(c.status.clone()),
-                        accent: None,
-                        section: false,
-                        percent: None,
-                    })
-                    .collect(),
-                summary: format!("{} running", containers.len()),
-                left: false,
-            });
-        }
-    }
-    if dash.combined && !out.is_empty() {
-        let mut rows = Vec::new();
-        for (k, c) in out.iter().enumerate() {
-            if k > 0 {
-                rows.push(CardRow {
-                    health: None,
-                    name: String::new(),
-                    detail: None,
-                    accent: None,
-                    section: false,
-                    percent: None,
-                });
-            }
-            rows.push(CardRow {
-                health: None,
-                name: format!("{} {}", c.glyph, c.title),
-                detail: None,
-                accent: Some(c.accent),
-                section: false,
-                percent: None,
-            });
-            rows.extend(c.rows.iter().cloned());
-        }
-        let summary = format!("{} sections", out.len());
-        out = vec![SideCard {
-            title: dash.title.clone().unwrap_or_else(|| "dashboard".into()),
-            glyph: dash.glyph.clone().unwrap_or_else(|| DEFAULT_GLYPH.into()),
-            accent: dash
-                .accent
-                .as_deref()
-                .and_then(accent_rgb)
-                .unwrap_or(DEFAULT_ACCENT),
-            rows,
-            summary,
-            left: dash.side.as_deref() == Some("left"),
-        }];
-    }
-    out
 }
 
 /// Greedy top-down placement of the cards in `idx` into `avail` rows:
@@ -392,7 +250,7 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
             budget.saturating_sub(base + 1)
         };
         lines.push(Line::default());
-        lines.extend(card_row_lines(
+        lines.extend(cards::card_row_lines(
             &card.rows,
             shown,
             bw.saturating_sub(2) as usize,
@@ -431,7 +289,7 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
     let sw = s
         .cards
         .iter()
-        .map(natural_width)
+        .map(cards::natural_width)
         .max()
         .unwrap_or(SIDE_W)
         .clamp(SIDE_W, SIDE_MAX_W)
@@ -486,14 +344,9 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
         .map_or(brect.bottom(), |b| b.max(brect.bottom()))
         + 1;
 
-    let ctx = sky::Ctx {
-        tick: s.tick,
-        area,
-        card_band: (cards_y + 2) as i32,
-        low_lane: (hint_y + 1) as i32,
-    };
+    let ctx = sky::Ctx { tick: s.tick, area };
     let buf = f.buffer_mut();
-    sky::render_behind(&ctx, &s.sky, buf);
+    sky::render(&ctx, &s.sky, buf);
 
     Title { tick: s.tick }.render(title_rect, buf);
 
@@ -509,7 +362,7 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
     Paragraph::new(lines).render(inner, buf);
 
     for (i, rect, shown) in &side_rects {
-        render_side_card(&s.cards[*i], *shown, *rect, s.tick, buf);
+        cards::render_side_card(&s.cards[*i], *shown, *rect, s.tick, buf);
     }
 
     if hint_y < area.bottom() {
@@ -528,10 +381,10 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
         .alignment(Alignment::Center)
         .render(hint, buf);
     }
-
-    sky::render_front(&ctx, &s.sky, buf);
 }
 
+/// The single-line layout for terminals too small for the full art: the sky
+/// still twinkles behind a centered wordmark and status line.
 fn draw_compact(f: &mut Frame, s: &ViewState) {
     let area = f.area();
     let mid = area.y + area.height / 2;
@@ -555,14 +408,9 @@ fn draw_compact(f: &mut Frame, s: &ViewState) {
     }
     status.push_str(" · q to sleep");
 
-    let ctx = sky::Ctx {
-        tick: s.tick,
-        area,
-        card_band: area.y as i32 + 1,
-        low_lane: area.y as i32 + 1,
-    };
+    let ctx = sky::Ctx { tick: s.tick, area };
     let buf = f.buffer_mut();
-    sky::draw_one("ufo", &ctx, &s.sky, buf);
+    sky::render(&ctx, &s.sky, buf);
     if mid > area.y {
         Paragraph::new(Line::from(spans))
             .alignment(Alignment::Center)
@@ -592,7 +440,6 @@ fn draw_compact(f: &mut Frame, s: &ViewState) {
             buf,
         );
     }
-    sky::draw_one("rocket", &ctx, &s.sky, buf);
 }
 
 /// The status card body. `folded` lists cards that didn't fit as cards and
@@ -655,7 +502,7 @@ fn status_lines(s: &ViewState, folded: &[usize], display_width: u16) -> Vec<Line
                 Style::default().fg(RED),
             ));
         }
-        extra.push(row(&truncate(&card.title, 9), spans));
+        extra.push(row(&cards::truncate(&card.title, 9), spans));
     }
     if !extra.is_empty() {
         lines.push(Line::default());
@@ -693,271 +540,6 @@ fn badges(s: &ViewState) -> Line<'static> {
         spans.push(Span::raw("  "));
     }
     Line::from(spans)
-}
-
-/// The width [`render_side_card`] needs to show every row of `card` whole:
-/// borders and indent, the health dot, the shared name column, and the
-/// longest detail — or the title line, whichever is wider.
-fn natural_width(card: &SideCard) -> u16 {
-    let name_w = card
-        .rows
-        .iter()
-        .filter(|r| r.detail.is_some() && r.percent.is_none())
-        .map(|r| r.name.chars().count())
-        .max()
-        .unwrap_or(0)
-        .min(NAME_W);
-    let body = card
-        .rows
-        .iter()
-        .map(|r| {
-            if let Some(percent) = r.percent {
-                let detail = r.detail.as_deref().map_or(0, |d| d.chars().count() + 1);
-                return r.name.chars().count() + detail + 27 + usize::from(percent == 100);
-            }
-            let dot = if r.health.is_some() { 2 } else { 0 };
-            match &r.detail {
-                Some(d) => dot + name_w + 1 + d.chars().count(),
-                None => dot + r.name.chars().count(),
-            }
-        })
-        .max()
-        .unwrap_or(0);
-    let title = card.glyph.chars().count() + card.title.chars().count() + 8;
-    (body + 4).max(title) as u16
-}
-
-/// One dashboard card: an accent-tinted box titled with a glyph and count,
-/// listing rows with optional health dots and detail columns.
-fn render_side_card(card: &SideCard, shown: usize, rect: Rect, tick: u64, buf: &mut Buffer) {
-    Clear.render(rect, buf);
-    let bad = card
-        .rows
-        .iter()
-        .filter(|r| r.health == Some(Health::Bad))
-        .count();
-    let mut title = vec![
-        Span::styled(
-            format!(" {} ", card.glyph),
-            Style::default().fg(scale(card.accent, 1.0)),
-        ),
-        Span::styled(
-            // Spacer rows are layout, not content — they don't count.
-            format!(
-                "{} · {}",
-                card.title,
-                card.rows.iter().filter(|r| !is_blank(r)).count()
-            ),
-            Style::default().fg(SLATE_400),
-        ),
-    ];
-    if bad > 0 {
-        title.push(Span::styled(
-            format!(" · {bad} bad"),
-            Style::default().fg(RED),
-        ));
-    }
-    title.push(Span::raw(" "));
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(scale(card.accent, 0.6)))
-        .title(Line::from(title))
-        .title_alignment(Alignment::Center);
-    let inner = block.inner(rect);
-    block.render(rect, buf);
-
-    let mut lines = vec![Line::default()];
-    lines.extend(card_row_lines(
-        &card.rows,
-        shown,
-        inner.width as usize,
-        tick,
-    ));
-    Paragraph::new(lines).render(inner, buf);
-}
-
-/// The body lines of a card: health dots, aligned name/detail columns,
-/// accented headers, and a trailing "+N more" when rows are cut. `inner_w`
-/// is the width of the box the lines will live in, minus its borders.
-fn card_row_lines(rows: &[CardRow], shown: usize, inner_w: usize, tick: u64) -> Vec<Line<'static>> {
-    let name_w = rows
-        .iter()
-        .take(shown)
-        .filter(|r| r.detail.is_some() && r.percent.is_none())
-        .map(|r| r.name.chars().count())
-        .max()
-        .unwrap_or(NAME_W)
-        .min(NAME_W);
-    let meter_name_w = rows
-        .iter()
-        .take(shown)
-        .filter(|r| r.percent.is_some())
-        .map(|r| r.name.chars().count())
-        .max()
-        .unwrap_or(0)
-        .min(15);
-    let mut lines = Vec::new();
-    for (i, r) in rows.iter().take(shown).enumerate() {
-        if r.section {
-            let accent = r.accent.unwrap_or(DEFAULT_ACCENT);
-            let title_w = r.name.chars().count();
-            let rule_w = inner_w.saturating_sub(title_w + 6);
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled("─ ", Style::default().fg(scale(accent, 0.55))),
-                Span::styled(
-                    r.name.clone(),
-                    Style::default()
-                        .fg(scale(accent, 1.0))
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!(" {}", "─".repeat(rule_w)),
-                    Style::default().fg(scale(accent, 0.35)),
-                ),
-            ]));
-            continue;
-        }
-        if let Some(percent) = r.percent {
-            let accent = r.accent.unwrap_or(DEFAULT_ACCENT);
-            let bar_color = scale(accent, 1.0);
-            let value_color = match percent {
-                90..=100 => scale(HEALTH_BAD, 1.0),
-                75..=89 => scale(HEALTH_WARN, 1.0),
-                _ => bar_color,
-            };
-            let detail = r.detail.as_deref().unwrap_or_default();
-            let continues = rows.get(i + 1).is_some_and(|next| next.percent.is_some());
-            let branch = if continues { "├ " } else { "╰ " };
-            let fixed = 4 + 2 + meter_name_w + 1 + 5;
-            let available = inner_w.saturating_sub(fixed);
-            let detail_w = detail
-                .chars()
-                .count()
-                .min(22)
-                .min(available.saturating_sub(9 + 2));
-            let gauge_w = available
-                .saturating_sub(usize::from(detail_w > 0) * 2 + detail_w)
-                .min(14);
-            let (filled, partial, empty) = gauge_parts(percent, gauge_w);
-            let mut spans = vec![
-                Span::raw("    "),
-                Span::styled(branch, Style::default().fg(scale(accent, 0.5))),
-                Span::styled(
-                    format!("{:<meter_name_w$} ", truncate(&r.name, meter_name_w)),
-                    Style::default().fg(SLATE_400),
-                ),
-                Span::styled("█".repeat(filled), Style::default().fg(bar_color)),
-            ];
-            if let Some(ch) = partial {
-                spans.push(Span::styled(ch.to_string(), Style::default().fg(bar_color)));
-            }
-            spans.extend([
-                Span::styled("░".repeat(empty), Style::default().fg(SLATE_700)),
-                Span::styled(
-                    format!(" {percent:>3}%"),
-                    Style::default()
-                        .fg(value_color)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]);
-            if detail_w > 0 {
-                spans.push(Span::styled("  ", Style::default().fg(SLATE_700)));
-                spans.push(Span::styled(
-                    truncate(detail, detail_w),
-                    Style::default().fg(SLATE_500),
-                ));
-            }
-            lines.push(Line::from(spans));
-            continue;
-        }
-        let mut spans = vec![Span::raw("  ")];
-        let mut used = 2usize;
-        if let Some(h) = r.health {
-            let fg = match h {
-                Health::Bad => pulse(HEALTH_BAD, tick + i as u64 * 8),
-                Health::Warn => pulse(HEALTH_WARN, tick + i as u64 * 8),
-                Health::Good => pulse(HEALTH_GOOD, tick + i as u64 * 8),
-                Health::Off => SLATE_600,
-            };
-            spans.push(Span::styled("● ", Style::default().fg(fg)));
-            used += 2;
-        }
-        match &r.detail {
-            Some(detail) => {
-                let active = r.name.trim_start().starts_with('▸');
-                spans.push(Span::styled(
-                    format!("{:<name_w$} ", truncate(&r.name, name_w)),
-                    Style::default()
-                        .fg(if active { TEXT } else { SLATE_400 })
-                        .add_modifier(if active {
-                            Modifier::BOLD
-                        } else {
-                            Modifier::empty()
-                        }),
-                ));
-                let dw = inner_w.saturating_sub(used + name_w + 1);
-                spans.push(Span::styled(
-                    truncate(detail, dw),
-                    Style::default().fg(SLATE_500),
-                ));
-            }
-            None => {
-                let w = inner_w.saturating_sub(used);
-                let fg = r.accent.map_or(SLATE_400, |rgb| scale(rgb, 1.0));
-                spans.push(Span::styled(truncate(&r.name, w), Style::default().fg(fg)));
-            }
-        }
-        lines.push(Line::from(spans));
-    }
-    if rows.len() > shown {
-        lines.push(Line::from(vec![
-            Span::raw("    "),
-            Span::styled(
-                format!("+{} more", rows.len() - shown),
-                Style::default().fg(SLATE_600),
-            ),
-        ]));
-    }
-    lines
-}
-
-/// A compact gauge with eighth-cell precision. Full blocks carry the accent,
-/// a partial block preserves small percentages, and shade cells show the
-/// unused portion without letting a meter dominate the whole row.
-fn gauge_parts(percent: u8, width: usize) -> (usize, Option<char>, usize) {
-    if width == 0 {
-        return (0, None, 0);
-    }
-    let eighths = (usize::from(percent) * width * 8 + 50) / 100;
-    let full = (eighths / 8).min(width);
-    let remainder = eighths % 8;
-    let partial = if full < width {
-        match remainder {
-            0 => None,
-            1 => Some('▏'),
-            2 => Some('▎'),
-            3 => Some('▍'),
-            4 => Some('▌'),
-            5 => Some('▋'),
-            6 => Some('▊'),
-            _ => Some('▉'),
-        }
-    } else {
-        None
-    };
-    let empty = width.saturating_sub(full + usize::from(partial.is_some()));
-    (full, partial, empty)
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-        out.push('…');
-        out
-    }
 }
 
 fn power_spans(p: &PowerStatus) -> Vec<Span<'static>> {
@@ -1001,7 +583,7 @@ impl Widget for Title {
                 if let Some(cell) = buf.cell_mut((x, y)) {
                     cell.set_char(ch);
                     cell.set_fg(color);
-                    // Clear any half-block background a sprite passing behind
+                    // Clear any half-block background a trail passing behind
                     // the title left in this cell.
                     cell.set_bg(ratatui::style::Color::Reset);
                 }
@@ -1017,49 +599,72 @@ pub fn fmt_hms(d: Duration) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{gauge_parts, is_blank, space_sections};
-    use crate::collect::{CardRow, Health};
+    use super::*;
+    use crate::collect::CardRow;
+    use ratatui::{backend::TestBackend, Terminal};
 
-    #[test]
-    fn gauge_keeps_small_values_visible_and_width_stable() {
-        assert_eq!(gauge_parts(0, 10), (0, None, 10));
-        assert_eq!(gauge_parts(9, 10), (0, Some('▉'), 9));
-        assert_eq!(gauge_parts(50, 10), (5, None, 5));
-        assert_eq!(gauge_parts(100, 10), (10, None, 0));
+    fn state(cards: Vec<SideCard>, merged: bool) -> ViewState {
+        ViewState {
+            tick: 7,
+            elapsed: Duration::from_secs(2537),
+            total: Some(Duration::from_secs(7200)),
+            remaining: Some(Duration::from_secs(4663)),
+            kinds: vec![Kind::Display, Kind::Idle],
+            power: PowerStatus {
+                on_ac: true,
+                percent: Some(100),
+            },
+            cards,
+            merged,
+            sky: vec![true; sky::FLYERS.len()],
+        }
     }
 
-    fn row(name: &str, section: bool) -> CardRow {
-        CardRow {
-            health: (!section && !name.is_empty()).then_some(Health::Good),
-            name: name.into(),
-            detail: None,
-            accent: None,
-            section,
-            percent: None,
+    fn meter_card(left: bool) -> SideCard {
+        SideCard {
+            title: "usage".into(),
+            glyph: "✦".into(),
+            accent: (148, 163, 184),
+            rows: vec![
+                CardRow {
+                    name: "✻ claude".into(),
+                    accent: Some((217, 119, 87)),
+                    section: true,
+                    ..CardRow::default()
+                },
+                CardRow {
+                    health: Some(Health::Good),
+                    name: "▸ cxkw.dev".into(),
+                    detail: Some("42% used".into()),
+                    ..CardRow::default()
+                },
+                CardRow {
+                    name: "weekly".into(),
+                    detail: Some("resets Sun 03:49".into()),
+                    accent: Some((217, 119, 87)),
+                    percent: Some(96),
+                    ..CardRow::default()
+                },
+            ],
+            summary: "3 items".into(),
+            left,
         }
     }
 
     #[test]
-    fn sections_get_breathing_room_but_never_a_leading_blank() {
-        let rows = vec![
-            row("✻ claude", true),
-            row("cxkw.dev", false),
-            row("◎ openai codex", true),
-            row("cxkw.dev", false),
-        ];
-        let spaced = space_sections(&rows);
-        let shape: Vec<&str> = spaced
-            .iter()
-            .map(|r| if is_blank(r) { "_" } else { "x" })
-            .collect();
-        assert_eq!(shape, ["x", "x", "_", "x", "x"]);
-    }
-
-    #[test]
-    fn existing_blanks_are_left_alone() {
-        // The combined dashboard already separates cards with a blank row;
-        // a section header right after one must not stack a second.
-        let rows = vec![row("web", false), row("", false), row("≋ docker", true)];
-        assert_eq!(space_sections(&rows).len(), rows.len());
+    fn draw_survives_any_terminal_size_and_layout() {
+        // Every layout branch — compact, stacked, wide, three-column,
+        // merged — across sizes from degenerate to spacious.
+        for (w, h) in [(1, 1), (40, 8), (65, 30), (66, 18), (90, 24), (150, 45)] {
+            for (cards, merged) in [
+                (vec![], false),
+                (vec![meter_card(false)], false),
+                (vec![meter_card(true), meter_card(false)], false),
+                (vec![meter_card(false)], true),
+            ] {
+                let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+                terminal.draw(|f| draw(f, &state(cards, merged))).unwrap();
+            }
+        }
     }
 }

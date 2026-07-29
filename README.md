@@ -3,48 +3,60 @@
 Keep your Mac awake, beautifully. insomnia is a `caffeinate` replacement that
 holds IOKit power assertions directly — no sudo, no child processes, and the
 kernel lets go the instant it exits — wrapped in a night-sky TUI: a twinkling
-starfield, pixel-art ships crossing on their own orbits, a live status card
-with an awake timer and countdown, and a small dashboard you can teach new
-tricks.
+starfield with comets and shooting stars streaking through, a live status
+card with an awake timer and countdown, and a small dashboard you can teach
+new tricks.
 
 **macOS only.** insomnia talks to IOKit directly — that's the whole point,
 and it doesn't pretend to run anywhere else.
 
 ```text
-·                    ˚  ✦                               ▀▄                                             ▄▀
-                 ·      ⋆                                 ▀▄                                         ▄▀
-         ˚           · .     ▄▄▀▀▄▄                         ▀▄˚  ⋆              ·        ·     ✦   ▄▀
-       ✧            ▄▄▀▀▄▄    ▀▀▀▀ ⋆  ▄▄▀▀▄▄                  ▀▄                                 ▄▀
-        .            ▀▀▀██╗███╗   ██╗███████╗.██████╗ ███╗  ✧███╗███╗   ██╗██╗ █████╗        ˚▄▄▀        ˚
-       ✦        ✧    ˚  ██║████╗▄ ██║██╔════╝██╔═══██╗████╗ ████║████╗  ██║██║██╔══██╗        ▀    .
-              ▄         ██║██╔██╗ ██║███████╗██║   ██║██╔████╔██║██╔██╗ ██║██║███████║           .      .˚
-               ▀▄       ██║██║╚██╗██║╚════██║██║   ██║██║╚██╔╝██║██║╚██╗██║██║██╔══██║        ·      ✧
-   ˚             ▀▄    .██║██║ ╚████║███████║╚██████╔╝██║ ╚═╝ ██║██║ ╚████║██║██║  ██║ ·
-      .            ▀▄   ╚═╝╚═╝ ▀╚═══╝╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝           .    │
-                     ▀▄        ▀▀                            .               ⋆                ·      ─✦─
-           ╭──────────────────── ☾ ─────────────────────╮  ╭──────────── ⌖ todos · 2 ─────────────╮  ✧│     ˚
-           │                                            │  │                                      │
- · ⋆       │   ● display  ● system                      │  │  #42 ship the login flow             │
-           │                                            │  │  #57 tidy the release notes          │
-           │   awake    00:42:17                        │  │                                      │    ·
-      ·    │   until    01:17:43                        │  ╰──────────────────────────────────────╯
-         ˚ │   ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱           │                   ˚                ⋆             ·
-           │   power    ac power · 100%                 │  ╭──────────── ≋ docker · 5 ────────────╮
-        ✦  │                                            │  │                                      │    .
-        ⋆  ╰────────────────────────────────────────────╯  │  ● worker                restarting  │
-                                            ✦              │  ● web                   up 3 hours  │
-                                                           │  ● postgres              up 3 hours  │         .
-            ⋆                          ˚                   │  ● redis                 up 3 hours  │     ✧
-                             .                             │  ● builder               up 2 hours  │          ˚
-         .                                                 │                                      │         ˚
-      ˚        ˚  ˚                               ✦✧       ╰──────────────────────────────────────╯
-                            ˚      ✧                         · ·    ˚                                    ·
-                 ·     ⋆                      ˚q — let it sleep                                .
-                                                             ·                                        ·
-  ⋆                                        ·   ⋆           ·
-  ·                   ✦       ·                   ˚                                                          .
-     .      ·                        ˚           ·                                             ˚
-✦  · ✦          ˚                                                .                                 .
+·                    ˚  ✦                                                                               ˚
+                 ·      ██╗███╗   ██╗███████╗ ██████╗ ███╗   ███╗███╗   ██╗██╗ █████╗                   ▄▀
+         ˚           · .██║████╗  ██║██╔════╝██╔═══██╗████╗ ████║████╗  ██║██║██╔══██╗   ·     ✦      ▄▀
+       ✧                ██║██╔██╗ ██║███████╗██║   ██║██╔████╔██║██╔██╗ ██║██║███████║              ▄▀
+        .               ██║██║╚██╗██║╚════██║██║   ██║██║╚██╔╝██║██║╚██╗██║██║██╔══██║       ˚    ▄▀     ˚
+       ✦      ▀▄✧    ˚  ██║██║.╚████║███████║╚██████╔╝██║ ╚═╝✦██║██║ ╚████║██║██║  ██║          ▄▀ .
+                ▀▄      ╚═╝╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝ ˚   ╚═╝╚═╝▄ ╚═══╝╚═╝╚═╝  ╚═╝        ▀▀ .      .˚
+                  ▀▄       ·            ·    ˚                                  ˚             ·      ✧
+   ˚         ╭─────────────────────────────────────── ☾ ────────────────────────────────────────╮
+      .      │                                                                                  │.    │
+             │   ● display  ● system                                                            │    ─✦─
+             │                                                                                  │    ✧│     ˚
+             │   awake    00:42:17                                                              │˚
+ · ⋆         │   until    01:17:43                                                              │
+             │   ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱           │
+             │   power    ac power · 100%                                                       │      ·
+      ·      │                                                                                  │
+         ˚   │  ✦ ai usage                                                                      │          ·
+             │  ─ ✻ claude ──────────────────────────────────────────────────────────────────── │
+        ✦    │  ● ▸ andy.nguyen      enterprise · $25.65 left · active                          │      .
+        ⋆    │    ╰ monthly spend   ████████████▏░  87%  $174.35 / $200                         │
+             │  ●   cxkw.dev         42% used                                                   │
+             │    ├ 5h window       █▎░░░░░░░░░░░░   9%  resets today 14:30                     │           .
+            ⋆│    ├ weekly          █████▉░░░░░░░░  42%  resets Sun 03:49                       │       ✧
+             │    ╰ Fable weekly    ██████████████ 100%  resets Sat 11:59                       │            ˚
+         .   │                                                                                  │           ˚
+      ˚      │  ─ ◎ openai codex ────────────────────────────────────────────────────────────── │
+             │  ● ▸ cxkw.dev         pro · 96% used · active                                    │        ·
+             │    ╰ weekly          █████████████▌  96%  resets Mon 09:00                       │
+             │  ●   andy.nguyen      business · 95% used · stale 1d                             │     ·
+  ⋆          │    ╰ monthly credits █████████████▎  95%  resets Fri 19:00                       │
+  ·          │                                                                                  │            .
+     .      ·│  ─ ⧉ copilot ─────────────────────────────────────────────────────────────────── │
+✦  · ✦       │  ● ▸ andy-nguyen-cxkw biz · unlimited                                            │  .
+ .   .       │                                                                                  │ ˚˚
+             │  ≋ docker                                                                        │
+             │  ● worker             restarting                                                 │       ˚
+            ⋆│  ● web                up 3 hours                                                 │      ·
+         ✧   │  ● postgres           up 3 hours                                                 │      .     ˚
+             │  ● redis              up 3 hours                                                 │✧
+      ·   ·  │  ● builder            up 2 hours                                                 │˚         ˚
+˚   ·        │                                                                                  │         .
+            .╰──────────────────────────────────────────────────────────────────────────────────╯
+                         ˚  ˚     ⋆             ·         ✦
+                            ˚           ·    ✦ q — let it sleep  ✧ ·
+                ˚·       ·                ˚ ˚                 ✦                                ⋆  ✦
 ```
 
 That's one frame, rendered headlessly in monochrome — the real thing is in
@@ -135,7 +147,7 @@ nothing.
 Layout takes care of itself: cards sail beside the status card on a wide
 terminal, dock beneath it on a narrow one, and any card that doesn't fit the
 height folds into a one-line summary inside the status card. A truly tiny
-terminal gets a single-line compact mode, ufo included.
+terminal gets a single-line compact mode, starfield included.
 
 Prefer one box to many? A `[dashboard]` table with `combined = true` folds
 every card — custom and docker alike — into the status box itself, each as
@@ -184,10 +196,10 @@ And a complete config, all three sections together:
 # ~/.config/insomnia/config.toml
 
 [docker]
-enabled = true    # the default; false grounds the whale's cargo card
+enabled = true    # the default; false retires the docker card
 
 [sky]
-raider = false    # a calmer night — no laser fire
+comets = false    # a calmer night — shooting stars only
 
 [[card]]
 title = "pull requests"
@@ -201,40 +213,34 @@ No config file is needed at all — everything above is optional.
 
 ## The sky
 
-Beyond the always-on starfield and glint stars, six flyers keep their own
-schedules:
+Beyond the always-on starfield and glint stars, two kinds of flyers keep
+their own schedules, each occasional enough that a pass always feels like a
+small event:
 
 | flyer | what it does |
 |-------|--------------|
-| `mothership` | a vast violet carrier, high and slow on so long an orbit that most nights never see it — green running lights ripple down its spine when you do |
-| `comets` | three of them — two ice-blue, one golden — streaking on long offset orbits |
-| `ufo` | drifts behind the title, tractor beam flickering on and off |
-| `scouts` | a vee of pink saucers; every few passes the leader rakes a scanning beam below |
-| `raider` | strafes the low sky, loosing twin crimson laser bolts ahead of itself |
-| `whale` | the docker whale freighter, slowly ferrying containers behind the cards |
-| `rocket` | the only one up close — flies in front of everything, low and fast |
+| `comets` | three of them — two ice-blue, one golden — long smooth tails on long offset orbits |
+| `shooting_stars` | brief silver streaks that dart across and are gone; each pass starts somewhere new |
 
-Ground any of them from the `[sky]` table:
+Ground either from the `[sky]` table:
 
 ```toml
 [sky]
-raider = false
-scouts = false
+shooting_stars = false
 ```
 
 Unlisted flyers stay on, and a misspelled name gets an error that lists what
 the sky holds.
 
-## Add your own ship
+## Add your own flyer
 
 The sky is a registry, and it's built to be extended — the full guide lives
-in a doc comment at the top of [`src/sky.rs`](src/sky.rs). Three steps:
+in a doc comment at the top of [`src/sky.rs`](src/sky.rs). Two steps:
 
-1. **Draw a sprite** in `art.rs` — rows of characters, one per pixel, mapped
-   to colors by a palette slice (`.` and space are transparent).
-2. **Write a draw function** in `sky.rs` that positions it from `ctx.tick`
-   and calls `pixel::draw_px_art`.
-3. **Add one `Flyer` entry** to the `FLYERS` list.
+1. **Write a draw function** in `sky.rs` that positions itself from
+   `ctx.tick` and draws with `pixel::set_px` — one call per pixel, half-block
+   resolution, out-of-bounds pixels clipped for free.
+2. **Add one `Flyer` entry** to the `FLYERS` list.
 
 That's it — it flies, and the `[sky]` config toggle for it appears
 automatically. Pull requests are very welcome. The sky has room.
@@ -262,7 +268,7 @@ only ever delays its own card; the animation never stutters.
 ```sh
 cargo run                                # the real thing
 cargo test                               # config parsing, durations, row protocol
-cargo run --example preview 110 34 7     # one headless frame: <width> <height> <tick>
+cargo run --example preview 110 46 7     # one headless frame: <width> <height> <tick>
 ```
 
 ## License

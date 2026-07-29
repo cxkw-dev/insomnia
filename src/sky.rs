@@ -1,87 +1,44 @@
 //! Everything that lives in the sky: the twinkling starfield, the glint
-//! stars, and a registry of pixel-art flyers that cross the screen.
+//! stars, and a registry of transient flyers — comets and shooting stars
+//! that occasionally streak through.
 //!
 //! # Adding your own flyer
 //!
-//! 1. Draw a sprite in `art.rs` — rows of chars, one char per pixel, mapped
-//!    to colors by a palette slice (`.` and space are transparent).
-//! 2. Write a `fn my_ship(ctx: &Ctx, buf: &mut Buffer)` here that positions
-//!    it from `ctx.tick` and calls `pixel::draw_px_art`.
-//! 3. Add one `Flyer` entry to [`FLYERS`]. Done — it flies, and users can
-//!    toggle it in their config with `[sky] my_ship = false`.
+//! 1. Write a `fn my_flyer(ctx: &Ctx, buf: &mut Buffer)` that positions
+//!    itself from `ctx.tick` and draws with [`pixel::set_px`].
+//! 2. Add one `Flyer` entry to [`FLYERS`]. Done — it flies, and users can
+//!    ground it in their config with `[sky] my_flyer = false`.
 //!
-//! Flyers on `Layer::Behind` render behind the title and cards; `Layer::Front`
-//! renders in front of everything. Position off `ctx`: `card_band` is a cell
-//! row at card height, `low_lane` a cell row just below the hint line.
+//! The whole sky draws before the title and the cards, so everything here
+//! passes behind them.
 
+use ratatui::style::Color;
 use ratatui::{buffer::Buffer, layout::Rect};
 
-use crate::art;
 use crate::pixel;
 use crate::theme::{SLATE_400, SLATE_500, SLATE_600, SLATE_700, TEXT, VIOLET_LIGHT};
-use ratatui::style::Color;
 
 /// Everything a flyer needs to place itself for the current frame.
 pub struct Ctx {
     pub tick: u64,
     pub area: Rect,
-    /// A cell row at card height — flyers here pass behind the cards.
-    pub card_band: i32,
-    /// A cell row just below the hint line — open sky on most layouts.
-    pub low_lane: i32,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Layer {
-    /// Drawn before the title and cards: the flyer passes behind them.
-    Behind,
-    /// Drawn after everything: the flyer passes in front, up close.
-    Front,
 }
 
 pub struct Flyer {
     /// The `[sky]` config key that toggles this flyer.
     pub name: &'static str,
-    pub layer: Layer,
     pub draw: fn(&Ctx, &mut Buffer),
 }
 
 /// Every flyer in the sky, in draw order. This is the one list to extend.
 pub const FLYERS: &[Flyer] = &[
     Flyer {
-        name: "mothership",
-        layer: Layer::Behind,
-        draw: mothership,
-    },
-    Flyer {
         name: "comets",
-        layer: Layer::Behind,
         draw: comets,
     },
     Flyer {
-        name: "ufo",
-        layer: Layer::Behind,
-        draw: ufo,
-    },
-    Flyer {
-        name: "scouts",
-        layer: Layer::Behind,
-        draw: scouts,
-    },
-    Flyer {
-        name: "raider",
-        layer: Layer::Behind,
-        draw: raider,
-    },
-    Flyer {
-        name: "whale",
-        layer: Layer::Behind,
-        draw: whale,
-    },
-    Flyer {
-        name: "rocket",
-        layer: Layer::Front,
-        draw: rocket,
+        name: "shooting_stars",
+        draw: shooting_stars,
     },
 ];
 
@@ -98,30 +55,13 @@ pub fn resolve(toggles: &std::collections::HashMap<String, bool>) -> Vec<bool> {
         .collect()
 }
 
-/// Draw the ambience and every enabled behind-layer flyer.
-pub fn render_behind(ctx: &Ctx, enabled: &[bool], buf: &mut Buffer) {
+/// Draw the whole sky: the ambient starfield and glint stars, then every
+/// enabled flyer from the registry.
+pub fn render(ctx: &Ctx, enabled: &[bool], buf: &mut Buffer) {
     starfield(ctx.tick, ctx.area, buf);
     sparkles(ctx.tick, ctx.area, buf);
     for (flyer, on) in FLYERS.iter().zip(enabled) {
-        if *on && flyer.layer == Layer::Behind {
-            (flyer.draw)(ctx, buf);
-        }
-    }
-}
-
-/// Draw every enabled front-layer flyer (over the cards and hint).
-pub fn render_front(ctx: &Ctx, enabled: &[bool], buf: &mut Buffer) {
-    for (flyer, on) in FLYERS.iter().zip(enabled) {
-        if *on && flyer.layer == Layer::Front {
-            (flyer.draw)(ctx, buf);
-        }
-    }
-}
-
-/// Draw a single flyer by name if it's enabled — used by the compact view.
-pub fn draw_one(name: &str, ctx: &Ctx, enabled: &[bool], buf: &mut Buffer) {
-    for (flyer, on) in FLYERS.iter().zip(enabled) {
-        if *on && flyer.name == name {
+        if *on {
             (flyer.draw)(ctx, buf);
         }
     }
@@ -318,174 +258,85 @@ fn comets(ctx: &Ctx, buf: &mut Buffer) {
     }
 }
 
-// The saucer drifts right-to-left near the top, passing behind the title,
-// marquee lights rotating, its tractor beam flickering on and off.
-fn ufo(ctx: &Ctx, buf: &mut Buffer) {
+// Shooting stars: brief silver streaks that dart across the sky and are gone
+// — a blink, not a passage like the comets. Each rides its own prime-length
+// cycle with a hashed start position, so they stay rare, land somewhere new
+// every pass, and never bunch up.
+fn shooting_stars(ctx: &Ctx, buf: &mut Buffer) {
     let (tick, area) = (ctx.tick, ctx.area);
-    if area.width < 30 {
+    if area.width < 30 || area.height < 8 {
         return;
     }
-    let period = area.width as u64 + 50;
-    let pos = period - (tick / 4) % period;
-    let x = area.x as i32 + pos as i32 - 25;
-    let y = area.y as i32 + 1 + ((tick / 16) % 2) as i32;
-    let rows: &[&str] = if (tick / 24) % 3 == 0 {
-        &art::UFO_PX[..6]
-    } else {
-        &art::UFO_PX
-    };
-    let map = if (tick / 8) % 2 == 0 {
-        art::UFO_MAP_A
-    } else {
-        art::UFO_MAP_B
-    };
-    pixel::draw_px_art(rows, map, x, y, 0.7, area, buf);
+    const LIFE: u64 = 11;
+    // Head to tail: white-hot cooling through slate into the dark.
+    const TRAIL: [(u8, u8, u8); 6] = [
+        (248, 250, 252),
+        (226, 232, 240),
+        (148, 163, 184),
+        (100, 116, 139),
+        (71, 85, 105),
+        (51, 65, 85),
+    ];
+    // (cycle, seed, dx): dx sets speed and direction; each star also drops
+    // one pixel row per tick, for a shallow slanting fall.
+    const STARS: [(u64, u32, i32); 3] = [(97, 0x7a21, 3), (149, 0x2fd3, -3), (233, 0xc489, 4)];
+    for (cycle, seed, dx) in STARS {
+        let t = tick % cycle;
+        if t >= LIFE {
+            continue;
+        }
+        let h = mix((tick / cycle) as u32, seed);
+        let half_w = (area.width as u32 / 2).max(1);
+        let sx = if dx > 0 {
+            area.x as i32 + (h % half_w) as i32
+        } else {
+            area.right() as i32 - (h % half_w) as i32
+        };
+        // Start in the upper half of the sky (pixel rows), falling from there.
+        let sy = area.y as i32 * 2 + ((h >> 9) % area.height as u32) as i32;
+        let head = (sx + t as i32 * dx, sy + t as i32);
+        for (k, rgb) in TRAIL.iter().enumerate() {
+            let k = k as i32;
+            pixel::set_px(head.0 - k * dx.signum(), head.1 - k / 3, *rgb, area, buf);
+        }
+    }
 }
 
-// A vee of pink scout saucers sweeps left-to-right along the top; every few
-// passes the leader rakes a dashed scanning beam over whatever lies below.
-fn scouts(ctx: &Ctx, buf: &mut Buffer) {
-    let (tick, area) = (ctx.tick, ctx.area);
-    if area.width < 40 {
-        return;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn resolve_defaults_on_and_honors_toggles() {
+        let mut toggles = HashMap::new();
+        assert!(resolve(&toggles).iter().all(|on| *on));
+        toggles.insert("comets".into(), false);
+        let on = resolve(&toggles);
+        assert_eq!(on.len(), FLYERS.len());
+        assert!(!on[0]);
+        assert!(on[1..].iter().all(|on| *on));
     }
-    let period = area.width as u64 + 90;
-    let x = area.x as i32 + ((tick / 3 + 57) % period) as i32 - 30;
-    let y = area.y as i32 + 2;
-    for (dx, dy, phase) in [(0, 0, 0u64), (-11, 1, 8), (11, 1, 16)] {
-        let bob = ((tick / 12 + phase) % 2) as i32;
-        pixel::draw_px_art(
-            &art::SCOUT_PX,
-            art::SCOUT_MAP,
-            x + dx,
-            y + dy + bob,
-            0.8,
-            area,
-            buf,
-        );
-    }
-    // The scanning beam: dashed pink, the gaps flowing downward as it sweeps.
-    if (tick / 48) % 4 == 0 {
-        let bx = x + 3;
-        let py0 = y * 2 + 8;
-        for k in 0..12i32 {
-            if (k + (tick / 2) as i32) % 3 != 0 {
-                let fade = 1.0 - k as f32 * 0.07;
-                pixel::set_px(bx, py0 + k, pixel::dim((244, 114, 182), fade), area, buf);
-                pixel::set_px(
-                    bx + 1,
-                    py0 + k,
-                    pixel::dim((244, 114, 182), fade * 0.8),
-                    area,
-                    buf,
-                );
+
+    #[test]
+    fn every_size_and_tick_renders_without_panic() {
+        // Covers the guards: degenerate areas, just under and over each
+        // flyer's minimum, and ticks spanning every flyer's live window.
+        let all_on = vec![true; FLYERS.len()];
+        for (w, h) in [
+            (0, 0),
+            (1, 1),
+            (29, 7),
+            (30, 8),
+            (39, 11),
+            (40, 12),
+            (120, 40),
+        ] {
+            let area = Rect::new(0, 0, w, h);
+            let mut buf = Buffer::empty(area);
+            for tick in (0..400).step_by(3) {
+                render(&Ctx { tick, area }, &all_on, &mut buf);
             }
         }
     }
-}
-
-// Alien raider: crosses right-to-left along the low lane, loosing twin
-// crimson laser bolts that streak ahead of it every few seconds. Skipped
-// entirely when the layout leaves it no sky to fly in.
-fn raider(ctx: &Ctx, buf: &mut Buffer) {
-    let (tick, area, y_cell) = (ctx.tick, ctx.area, ctx.low_lane);
-    if area.width < 50 || y_cell + 4 > area.bottom() as i32 {
-        return;
-    }
-    let period = area.width as u64 + 80;
-    let pos = period - (tick / 3) % period;
-    let x = area.x as i32 + pos as i32 - 40;
-    let y = y_cell + ((tick / 14) % 2) as i32;
-    let (rows, map) = if (tick / 2) % 2 == 0 {
-        (&art::RAIDER_PX_A, art::RAIDER_MAP_A)
-    } else {
-        (&art::RAIDER_PX_B, art::RAIDER_MAP_B)
-    };
-    pixel::draw_px_art(rows, map, x, y, 0.95, area, buf);
-
-    // Bolts spawn at the nose and outrun the ship at 3px a tick, white-hot at
-    // the head and cooling to ember through the tail. Fire only while the
-    // nose is actually on screen — no shots from beyond the void.
-    const FIRE_CYCLE: u64 = 96;
-    const BOLT_LIFE: u64 = 26;
-    let ft = tick % FIRE_CYCLE;
-    if ft < BOLT_LIFE && x < area.right() as i32 {
-        let bx = x - 2 - ft as i32 * 3;
-        let py = y * 2 + 2;
-        const BOLT: [(u8, u8, u8); 5] = [
-            (254, 242, 242),
-            (252, 165, 165),
-            (248, 113, 113),
-            (220, 38, 38),
-            (127, 29, 29),
-        ];
-        for (k, rgb) in BOLT.iter().enumerate() {
-            pixel::set_px(bx + k as i32, py, *rgb, area, buf);
-            pixel::set_px(bx + k as i32, py + 1, *rgb, area, buf);
-        }
-    }
-}
-
-// The docker whale freighter drifts slowly to the right at card height,
-// ferrying its containers behind the dashboards and out the other side.
-fn whale(ctx: &Ctx, buf: &mut Buffer) {
-    let (tick, area, y_cell) = (ctx.tick, ctx.area, ctx.card_band);
-    if area.width < 40 {
-        return;
-    }
-    let period = area.width as u64 + 70;
-    let x = area.x as i32 + ((tick / 5) % period) as i32 - 30;
-    let y = y_cell + ((tick / 18) % 2) as i32;
-    // Slow tail flap (shape), fast ion-trail shimmer (palette).
-    let rows: &[&str] = if (tick / 24) % 2 == 0 {
-        &art::WHALE_PX_A
-    } else {
-        &art::WHALE_PX_B
-    };
-    let map = if (tick / 4) % 2 == 0 {
-        art::WHALE_MAP_A
-    } else {
-        art::WHALE_MAP_B
-    };
-    pixel::draw_px_art(rows, map, x, y, 0.9, area, buf);
-}
-
-// Drawn last: the rocket flies in front of everything, close and fast.
-fn rocket(ctx: &Ctx, buf: &mut Buffer) {
-    let (tick, area) = (ctx.tick, ctx.area);
-    let y = area.bottom().saturating_sub(3);
-    if area.width < 30 || y >= area.bottom() {
-        return;
-    }
-    let period = area.width as u64 + 60;
-    let x0 = area.x as i32 + ((tick / 2) % period) as i32 - 30;
-    let map = if tick % 2 == 0 {
-        art::ROCKET_MAP_A
-    } else {
-        art::ROCKET_MAP_B
-    };
-    pixel::draw_px_art(&art::ROCKET_PX, map, x0, y as i32, 1.0, area, buf);
-}
-
-// The mothership: right-to-left along the very top, so slow it barely moves,
-// and on so long a cycle that most passes of the sky never see it. Running
-// lights ripple green down the spine while it's here.
-fn mothership(ctx: &Ctx, buf: &mut Buffer) {
-    let (tick, area) = (ctx.tick, ctx.area);
-    if area.width < 60 {
-        return;
-    }
-    let period = area.width as u64 * 3 + 200;
-    let pos = period - (tick / 7) % period;
-    let x = area.x as i32 + pos as i32 - 30;
-    if x > area.right() as i32 {
-        return;
-    }
-    let y = area.y as i32;
-    let map = if (tick / 10) % 2 == 0 {
-        art::MOTHERSHIP_MAP_A
-    } else {
-        art::MOTHERSHIP_MAP_B
-    };
-    pixel::draw_px_art(&art::MOTHERSHIP_PX, map, x, y, 0.55, area, buf);
 }

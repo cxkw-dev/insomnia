@@ -34,8 +34,9 @@ pub struct Container {
     pub health: Health,
 }
 
-/// One row of a custom card, parsed from a line of command output.
-#[derive(Clone, Debug, PartialEq)]
+/// One row of a custom card, parsed from a line of command output. The
+/// default value is a blank spacer row: no dot, no text, no meter.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CardRow {
     pub health: Option<Health>,
     pub name: String,
@@ -165,15 +166,14 @@ fn parse_row(line: &str) -> CardRow {
         if let (Some(rgb), Ok(percent)) = (accent_rgb(meter[1]), meter[3].parse::<u8>()) {
             if percent <= 100 {
                 return CardRow {
-                    health: None,
                     name: meter[2].to_string(),
                     detail: meter
                         .get(4)
                         .filter(|d| !d.is_empty())
                         .map(|d| d.to_string()),
                     accent: Some(rgb),
-                    section: false,
                     percent: Some(percent),
+                    ..CardRow::default()
                 };
             }
         }
@@ -182,12 +182,10 @@ fn parse_row(line: &str) -> CardRow {
     if parts.first() == Some(&"hdr") && parts.len() == 3 {
         if let Some(rgb) = accent_rgb(parts[1]) {
             return CardRow {
-                health: None,
                 name: parts[2].to_string(),
-                detail: None,
                 accent: Some(rgb),
                 section: true,
-                percent: None,
+                ..CardRow::default()
             };
         }
     }
@@ -206,17 +204,11 @@ fn parse_row(line: &str) -> CardRow {
                 .get(2)
                 .filter(|d| !d.is_empty())
                 .map(|d| d.to_string()),
-            accent: None,
-            section: false,
-            percent: None,
+            ..CardRow::default()
         },
         _ => CardRow {
-            health: None,
             name: line.trim().to_string(),
-            detail: None,
-            accent: None,
-            section: false,
-            percent: None,
+            ..CardRow::default()
         },
     }
 }
