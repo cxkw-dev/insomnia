@@ -122,9 +122,15 @@ as-is. Lines shaped `ok|name|detail`, `warn|name|detail`, or `bad|name|detail`
 get a pulsing health dot and aligned columns — the detail is optional, and
 `off|name|detail` gives a steady slate dot for rows that are present but
 dormant. A line shaped `hdr|accent|text` becomes a section header tinted
-with that accent, for cards that group rows from several sources. A card
-shows at most 32 rows, and only appears at all when its command succeeds and
-prints something, so a quiet source costs you nothing.
+with that accent and a horizontal divider, preceded by a blank line so each
+group reads as its own block. This is useful for giving each AI provider or
+environment a distinct visual lane inside one card.
+`bar|accent|label|percent|detail` renders a colored utilization meter from
+0–100 as a compact, high-resolution gauge; consecutive meters are joined to
+the account above them by a small branch rail. The detail is optional and is
+useful for reset times. A card shows at most 32 rows, and only appears at all
+when its command succeeds and prints something, so a quiet source costs you
+nothing.
 
 Layout takes care of itself: cards sail beside the status card on a wide
 terminal, dock beneath it on a narrow one, and any card that doesn't fit the
@@ -134,7 +140,7 @@ terminal gets a single-line compact mode, ufo included.
 Prefer one box to many? A `[dashboard]` table with `combined = true` folds
 every card — custom and docker alike — into the status box itself, each as
 a section under a header in that card's glyph and accent, so the whole app
-is a single box that grows to fit its widest row:
+is a single box that expands responsively on wider terminals:
 
 ```toml
 [dashboard]

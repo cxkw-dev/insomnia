@@ -42,6 +42,12 @@ pub struct CardRow {
     pub detail: Option<String>,
     /// Section headers (`hdr|accent|text`) carry their accent color here.
     pub accent: Option<(u8, u8, u8)>,
+    /// `hdr` rows are visual section dividers. Other accent-only rows are
+    /// card headers synthesized by the combined dashboard.
+    pub section: bool,
+    /// Utilization meters (`bar|accent|label|percent|detail`) carry a value
+    /// from 0–100 here. The optional detail is typically a reset time.
+    pub percent: Option<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -151,8 +157,27 @@ fn poll_card(cfg: &CardConfig) -> Option<CardData> {
 
 /// The card row protocol: `ok|name|detail`, `warn|name`, `bad|name|detail`,
 /// and `off|name|detail` get a health dot and columns; `hdr|accent|text` is
-/// a colored section header; anything else is a plain text row.
+/// a colored section header; `bar|accent|label|percent|detail` is an inline
+/// utilization meter; anything else is a plain text row.
 fn parse_row(line: &str) -> CardRow {
+    let meter: Vec<&str> = line.splitn(5, '|').map(str::trim).collect();
+    if meter.first() == Some(&"bar") && meter.len() >= 4 {
+        if let (Some(rgb), Ok(percent)) = (accent_rgb(meter[1]), meter[3].parse::<u8>()) {
+            if percent <= 100 {
+                return CardRow {
+                    health: None,
+                    name: meter[2].to_string(),
+                    detail: meter
+                        .get(4)
+                        .filter(|d| !d.is_empty())
+                        .map(|d| d.to_string()),
+                    accent: Some(rgb),
+                    section: false,
+                    percent: Some(percent),
+                };
+            }
+        }
+    }
     let parts: Vec<&str> = line.splitn(3, '|').map(str::trim).collect();
     if parts.first() == Some(&"hdr") && parts.len() == 3 {
         if let Some(rgb) = accent_rgb(parts[1]) {
@@ -161,6 +186,8 @@ fn parse_row(line: &str) -> CardRow {
                 name: parts[2].to_string(),
                 detail: None,
                 accent: Some(rgb),
+                section: true,
+                percent: None,
             };
         }
     }
@@ -180,12 +207,16 @@ fn parse_row(line: &str) -> CardRow {
                 .filter(|d| !d.is_empty())
                 .map(|d| d.to_string()),
             accent: None,
+            section: false,
+            percent: None,
         },
         _ => CardRow {
             health: None,
             name: line.trim().to_string(),
             detail: None,
             accent: None,
+            section: false,
+            percent: None,
         },
     }
 }
@@ -212,11 +243,28 @@ mod tests {
         assert_eq!(r.health, None);
         assert_eq!(r.accent, Some((217, 119, 87)));
         assert_eq!(r.name, "✻ claude");
+        assert!(r.section);
+        assert_eq!(r.percent, None);
 
         // An unknown accent falls back to a plain text row.
         let r = parse_row("hdr|mauve|x");
         assert_eq!(r.accent, None);
         assert_eq!(r.name, "hdr|mauve|x");
+    }
+
+    #[test]
+    fn bar_rows_carry_utilization_and_reset_detail() {
+        let r = parse_row("bar|teal|weekly|72|resets Sun 03:49");
+        assert_eq!(r.health, None);
+        assert_eq!(r.name, "weekly");
+        assert_eq!(r.detail.as_deref(), Some("resets Sun 03:49"));
+        assert_eq!(r.accent, Some((16, 163, 127)));
+        assert!(!r.section);
+        assert_eq!(r.percent, Some(72));
+
+        // Invalid percentages and accents remain visible as plain text.
+        assert_eq!(parse_row("bar|teal|weekly|101").percent, None);
+        assert_eq!(parse_row("bar|mauve|weekly|42").percent, None);
     }
 
     #[test]
