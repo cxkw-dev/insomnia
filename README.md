@@ -1,66 +1,70 @@
 # ☾ insomnia
 
 Keep your Mac awake, beautifully. insomnia is a `caffeinate` replacement that
-holds IOKit power assertions directly — no sudo, no child processes, and the
-kernel lets go the instant it exits — wrapped in a night-sky TUI: a twinkling
-starfield with comets and shooting stars streaking through, a live status
-card with an awake timer and countdown, and a small dashboard you can teach
-new tricks.
+holds IOKit power assertions directly — no sudo and no helper `caffeinate`
+process — wrapped in a night-sky TUI. The kernel lets go the instant insomnia
+exits. While it runs, a twinkling starfield surrounds Night Watch, a live awake
+timer and countdown, and a small dashboard you can teach new tricks.
 
 **macOS only.** insomnia talks to IOKit directly — that's the whole point,
 and it doesn't pretend to run anywhere else.
 
 ```text
 ·                    ˚  ✦                                                                               ˚
-                 ·      ██╗███╗   ██╗███████╗ ██████╗ ███╗   ███╗███╗   ██╗██╗ █████╗                   ▄▀
-         ˚           · .██║████╗  ██║██╔════╝██╔═══██╗████╗ ████║████╗  ██║██║██╔══██╗   ·     ✦      ▄▀
-       ✧                ██║██╔██╗ ██║███████╗██║   ██║██╔████╔██║██╔██╗ ██║██║███████║              ▄▀
-        .               ██║██║╚██╗██║╚════██║██║   ██║██║╚██╔╝██║██║╚██╗██║██║██╔══██║       ˚    ▄▀     ˚
-       ✦      ▀▄✧    ˚  ██║██║.╚████║███████║╚██████╔╝██║ ╚═╝✦██║██║ ╚████║██║██║  ██║          ▄▀ .
-                ▀▄      ╚═╝╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚═╝ ˚   ╚═╝╚═╝▄ ╚═══╝╚═╝╚═╝  ╚═╝        ▀▀ .      .˚
-                  ▀▄       ·            ·    ˚                                  ˚             ·      ✧
-   ˚         ╭─────────────────────────────────────── ☾ ────────────────────────────────────────╮
+                 ·      ⋆                             ▀▄                                                ▄▀
+         ˚           · .      ✦                         ▀▄    ˚  ⋆              ·        ·     ✦      ▄▀
+       ✧                           ⋆                      ▀▄                                        ▄▀
+        .                            ✧  ✦    .☾  I N S O M N I A                             ˚    ▄▀     ˚
+       ✦      ▀▄✧    ˚        .                              ✦▀▄                                ▄▀ .
+             ╭ ● awake ─────────────────────────────────────────────────────────────────────────╮.      .˚
+             │                                                                                  │    ✧
+   ˚         │   NIGHT WATCH                                              ● display  ● system   │
       .      │                                                                                  │.    │
-             │   ● display  ● system                                                            │    ─✦─
-             │                                                                                  │    ✧│     ˚
-             │   awake    00:42:17                                                              │˚
- · ⋆         │   until    01:17:43                                                              │
-             │   ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱           │
-             │   power    ac power · 100%                                                       │      ·
-      ·      │                                                                                  │
-         ˚   │  ✦ ai usage                                                                      │          ·
-             │  ─ ✻ claude ──────────────────────────────────────────────────────────────────── │
-        ✦    │  ● ▸ andy.nguyen      enterprise · $25.65 left · active                          │      .
-        ⋆    │    ╰ monthly spend   ████████████▏░  87%  $174.35 / $200                         │
+             │   00:42:17 awake                                            01:17:43 remaining   │    ─✦─
+             │   ━━━━━━━━━━━━━━━━━━━━━━━━━━◆───────────────────────────────────────────────  35%│    ✧│     ˚
+             │   ↯ ac power · 100%                                         auto release armed   │˚
+ · ⋆         │                                                                                  │
+             │  ✦ ai usage                                                                      │
+             │  ─ ✻ claude ──────────────────────────────────────────────────────────────────── │      ·
+      ·      │  ● ▸ andy.nguyen      enterprise · $25.65 left · active                          │
+         ˚   │    ╰ monthly spend   ████████████▏░  87%  $174.35 / $200                         │          ·
              │  ●   cxkw.dev         42% used                                                   │
-             │    ├ 5h window       █▎░░░░░░░░░░░░   9%  resets today 14:30                     │           .
-            ⋆│    ├ weekly          █████▉░░░░░░░░  42%  resets Sun 03:49                       │       ✧
-             │    ╰ Fable weekly    ██████████████ 100%  resets Sat 11:59                       │            ˚
-         .   │                                                                                  │           ˚
-      ˚      │  ─ ◎ openai codex ────────────────────────────────────────────────────────────── │
-             │  ● ▸ cxkw.dev         pro · 96% used · active                                    │        ·
-             │    ╰ weekly          █████████████▌  96%  resets Mon 09:00                       │
-             │  ●   andy.nguyen      business · 95% used · stale 1d                             │     ·
-  ⋆          │    ╰ monthly credits █████████████▎  95%  resets Fri 19:00                       │
+        ✦    │    ├ 5h window       █▎░░░░░░░░░░░░   9%  resets today 14:30                     │      .
+        ⋆    │    ├ weekly          █████▉░░░░░░░░  42%  resets Sun 03:49                       │
+             │    ╰ Fable weekly    ██████████████ 100%  resets Sat 11:59                       │
+             │                                                                                  │           .
+            ⋆│  ─ ◎ openai codex ────────────────────────────────────────────────────────────── │       ✧
+             │  ● ▸ cxkw.dev         pro · 96% used · active                                    │            ˚
+         .   │    ╰ weekly          █████████████▌  96%  resets Mon 09:00                       │           ˚
+      ˚      │  ●   andy.nguyen      business · 95% used · stale 1d                             │
+             │    ╰ monthly credits █████████████▎  95%  resets Fri 19:00                       │        ·
+             │                                                                                  │
+             │  ─ ⧉ copilot ─────────────────────────────────────────────────────────────────── │     ·
+  ⋆          │  ● ▸ andy-nguyen-cxkw biz · unlimited                                            │
   ·          │                                                                                  │            .
-     .      ·│  ─ ⧉ copilot ─────────────────────────────────────────────────────────────────── │
-✦  · ✦       │  ● ▸ andy-nguyen-cxkw biz · unlimited                                            │  .
- .   .       │                                                                                  │ ˚˚
-             │  ≋ docker                                                                        │
-             │  ● worker             restarting                                                 │       ˚
-            ⋆│  ● web                up 3 hours                                                 │      ·
-         ✧   │  ● postgres           up 3 hours                                                 │      .     ˚
-             │  ● redis              up 3 hours                                                 │✧
-      ·   ·  │  ● builder            up 2 hours                                                 │˚         ˚
-˚   ·        │                                                                                  │         .
-            .╰──────────────────────────────────────────────────────────────────────────────────╯
+     .      ·│  ≋ docker                                                                        │
+✦  · ✦       │  ● worker             restarting                                                 │  .
+ .   .       │  ● web                up 3 hours                                                 │ ˚˚
+             │  ● postgres           up 3 hours                                                 │
+             │  ● redis              up 3 hours                                                 │       ˚
+            ⋆│  ● builder            up 2 hours                                                 │      ·
+         ✧   │                                                                                  │      .     ˚
+             ╰──────────────────────────────────────────────────────────────────────────────────╯✧
+      ·   ·                           ✦                                                  ✦˚  ✦   ˚         ˚
+˚   ·         ˚                ˚˚           q release & let it sleep                       ⋆              .
+            .   . ·             ·              ✦             .
                          ˚  ˚     ⋆             ·         ✦
-                            ˚           ·    ✦ q — let it sleep  ✧ ·
+                            ˚           ·    ✦                   ✧ ·
                 ˚·       ·                ˚ ˚                 ✦                                ⋆  ✦
 ```
 
 That's one frame, rendered headlessly in monochrome — the real thing is in
 color, and everything up there moves.
+
+The AI usage section in this preview demonstrates a local custom card; it is
+not bundled and insomnia does not read provider credentials itself. Docker is
+the only built-in dashboard integration. Everything else uses the documented
+custom-card protocol below.
 
 ## Install
 
@@ -68,6 +72,14 @@ Requires [Rust](https://rustup.rs) and a Mac.
 
 ```sh
 cargo install --path .
+insomnia
+```
+
+Already installed from this checkout? Rebuild the copy on your `PATH`, quit the
+running app with `q`, and launch it again:
+
+```sh
+make install
 insomnia
 ```
 
@@ -102,9 +114,13 @@ Durations read the way you'd say them: a bare number is seconds (matching
 
 ## The dashboard
 
-The status card is always there: the awake timer, a countdown bar when you
-set `-t`, and your power source with battery percentage. Around it, dashboard
-cards come and go as their sources do.
+Night Watch is always there. It shows which power assertions are active, how
+long insomnia has held them, and the current power source and battery level.
+Give insomnia a duration with `-t` and it adds the remaining time, a progress
+timeline, and an `auto release armed` state. Without a duration, the timeline
+runs indefinitely until you release it with `q`.
+
+Around Night Watch, dashboard cards come and go as their sources do.
 
 **Docker is built in.** When the daemon is up, a `≋ docker` card lists every
 container with a pulsing health-colored dot, unhealthy ones sorted to the top.
@@ -143,6 +159,10 @@ the account above them by a small branch rail. The detail is optional and is
 useful for reset times. A card shows at most 32 rows, and only appears at all
 when its command succeeds and prints something, so a quiet source costs you
 nothing.
+
+Card commands are trusted local code and run through `sh -c`. Keep tokens and
+secrets out of the TOML file; prefer authenticated CLIs, Keychain-backed tools,
+or environment variables that are already available to the command.
 
 Layout takes care of itself: cards sail beside the status card on a wide
 terminal, dock beneath it on a narrow one, and any card that doesn't fit the
@@ -250,10 +270,10 @@ automatically. Pull requests are very welcome. The sky has room.
 insomnia calls the same IOKit API `caffeinate` uses —
 `IOPMAssertionCreateWithName` — to hold assertions like
 `PreventUserIdleDisplaySleep` and `PreventUserIdleSystemSleep` directly from
-the process. No sudo, no child processes. The kernel ties assertions to their
-process, so they release the moment insomnia exits, however it exits — even
-SIGKILL can't leave your display pinned awake. See for yourself while it's
-running:
+the process. No sudo and no separate keep-awake process. The kernel ties
+assertions to their process, so they release the moment insomnia exits,
+however it exits — even SIGKILL can't leave your display pinned awake. See for
+yourself while it's running:
 
 ```sh
 pmset -g assertions | grep insomnia

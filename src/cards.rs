@@ -26,8 +26,6 @@ const METER_LABEL_W: usize = 15;
 /// squeeze it below the min.
 const GAUGE_MAX_W: usize = 14;
 const GAUGE_MIN_W: usize = 9;
-/// Widest a meter's trailing detail (usually a reset time) may grow.
-const METER_DETAIL_W: usize = 22;
 /// Cells a meter row spends around its label and gauge: the indent, the
 /// branch rail, the label gap, and the " nnn%" value.
 const METER_CHROME: usize = 4 + 2 + 1 + 5;
@@ -156,6 +154,11 @@ fn is_blank(r: &CardRow) -> bool {
 /// The width [`render_side_card`] needs to show every row of `card` whole:
 /// borders and indent, the health dot, the shared name column, and the
 /// longest detail — or the title line, whichever is wider.
+///
+/// Both column widths are the shared ones the renderer will use, not each
+/// row's own: a meter with a short label still sits behind the widest
+/// label's gauge, so measuring it against its own label would ask for a
+/// card too narrow to hold that row's detail.
 pub fn natural_width(card: &SideCard) -> u16 {
     let name_w = card
         .rows
@@ -165,17 +168,21 @@ pub fn natural_width(card: &SideCard) -> u16 {
         .max()
         .unwrap_or(0)
         .min(NAME_W);
+    let label_w = card
+        .rows
+        .iter()
+        .filter(|r| r.percent.is_some())
+        .map(|r| r.name.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(METER_LABEL_W);
     let body = card
         .rows
         .iter()
         .map(|r| {
             if r.percent.is_some() {
-                let label = r.name.chars().count().min(METER_LABEL_W);
-                let detail = r
-                    .detail
-                    .as_deref()
-                    .map_or(0, |d| d.chars().count().min(METER_DETAIL_W) + 2);
-                return METER_CHROME + label + GAUGE_MAX_W + detail;
+                let detail = r.detail.as_deref().map_or(0, |d| d.chars().count() + 2);
+                return METER_CHROME + label_w + GAUGE_MAX_W + detail;
             }
             let dot = if r.health.is_some() { 2 } else { 0 };
             match &r.detail {
@@ -210,7 +217,7 @@ pub fn render_side_card(card: &SideCard, shown: usize, rect: Rect, tick: u64, bu
                 card.title,
                 card.rows.iter().filter(|r| !is_blank(r)).count()
             ),
-            Style::default().fg(SLATE_400),
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
         ),
     ];
     if bad > 0 {
@@ -224,7 +231,7 @@ pub fn render_side_card(card: &SideCard, shown: usize, rect: Rect, tick: u64, bu
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(scale(card.accent, 0.6)))
         .title(Line::from(title))
-        .title_alignment(Alignment::Center);
+        .title_alignment(Alignment::Left);
     let inner = block.inner(rect);
     block.render(rect, buf);
 
@@ -325,11 +332,13 @@ fn meter_line(
     };
     let detail = r.detail.as_deref().unwrap_or_default();
     let branch = if continues { "├ " } else { "╰ " };
+    // The detail takes whatever the row has left once the gauge keeps its
+    // minimum — no fixed ceiling, or a wide terminal would still clip a
+    // reset time the card has ample room for.
     let available = inner_w.saturating_sub(METER_CHROME + label_w);
     let detail_w = detail
         .chars()
         .count()
-        .min(METER_DETAIL_W)
         .min(available.saturating_sub(GAUGE_MIN_W + 2));
     let gauge_w = available
         .saturating_sub(usize::from(detail_w > 0) * 2 + detail_w)
@@ -491,6 +500,63 @@ mod tests {
         // a section header right after one must not stack a second.
         let rows = vec![row("web", false), row("", false), row("≋ docker", true)];
         assert_eq!(space_sections(&rows).len(), rows.len());
+    }
+
+    fn text(line: &Line<'static>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn natural_width_holds_every_row_whole() {
+        // The ai usage card's shape: the longest reset time rides a *short*
+        // label, so it sits behind the widest label's gauge — measuring that
+        // row against its own label would ask for a card too narrow for it.
+        let meter = |name: &str, detail: &str| CardRow {
+            name: name.into(),
+            detail: Some(detail.into()),
+            percent: Some(42),
+            ..CardRow::default()
+        };
+        let card = SideCard {
+            title: "ai usage".into(),
+            glyph: "✦".into(),
+            accent: DEFAULT_ACCENT,
+            rows: vec![
+                CardRow {
+                    health: Some(Health::Bad),
+                    name: "andy.nguyen".into(),
+                    detail: Some("business · 0 credits left · limit reached · stale 2d".into()),
+                    ..CardRow::default()
+                },
+                meter("5h window", "resets Mon 00:00 (in 4h)"),
+                meter("monthly credits", "resets Mon 19:00 (in 21d)"),
+            ],
+            summary: "3 items".into(),
+            left: false,
+        };
+        let inner = natural_width(&card) as usize - 2;
+        for line in card_row_lines(&card.rows, card.rows.len(), inner, 7) {
+            let rendered = text(&line);
+            assert!(
+                !rendered.contains('…'),
+                "clipped at natural width: {rendered}"
+            );
+            assert!(rendered.chars().count() <= inner, "overflows: {rendered}");
+        }
+    }
+
+    #[test]
+    fn a_meter_detail_grows_into_the_room_the_card_has() {
+        // No fixed ceiling on the detail column: given the width, the whole
+        // reset time shows.
+        let rows = vec![CardRow {
+            name: "weekly".into(),
+            detail: Some("resets Mon 19:00 (in 21d)".into()),
+            percent: Some(50),
+            ..CardRow::default()
+        }];
+        let line = text(&card_row_lines(&rows, 1, 80, 7)[0]);
+        assert!(line.ends_with("resets Mon 19:00 (in 21d)"), "{line}");
     }
 
     #[test]

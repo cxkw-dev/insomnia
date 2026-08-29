@@ -28,8 +28,8 @@ use crate::config::{Config, FileConfig};
 use crate::power::{Kind, PowerStatus};
 use crate::sky;
 use crate::theme::{
-    gradient, gradient_rgb, pulse, scale, tri, AMBER, EMERALD, GOLD, RED, SLATE_400, SLATE_500,
-    SLATE_600, SLATE_700, TEXT, VIOLET_LIGHT,
+    gradient, gradient_rgb, pulse, scale, tri, AMBER, EMERALD, GOLD, RED, SLATE_400, SLATE_600,
+    SLATE_700, TEXT, VIOLET_LIGHT,
 };
 
 const MAIN_W: u16 = 64;
@@ -199,12 +199,17 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
         .collect();
     // A combined dashboard gets the extra room a large terminal offers,
     // while standalone status cards preserve space for their side columns.
+    // MAIN_MAX_W is the box's comfortable size, not its ceiling: a card whose
+    // widest row needs more grows past it rather than clipping the row, as
+    // far as the terminal allows.
     let bw = match merged_card {
-        Some(_) => area
-            .width
-            .saturating_sub(4)
-            .clamp(MAIN_W, MAIN_MAX_W)
-            .min(area.width.saturating_sub(2)),
+        Some(card) => {
+            let max = MAIN_MAX_W.max(cards::natural_width(card));
+            area.width
+                .saturating_sub(4)
+                .clamp(MAIN_W, max)
+                .min(area.width.saturating_sub(2))
+        }
         None => MAIN_W.min(area.width.saturating_sub(2)),
     };
     let main_base = status_lines(s, &[], bw).len() as u16 + 3;
@@ -354,9 +359,14 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(scale((139, 92, 246), 0.8)))
-        .title(" ☾ ")
-        .title_style(Style::default().fg(GOLD))
-        .title_alignment(Alignment::Center);
+        .title(Line::from(vec![
+            Span::styled(" ● ", Style::default().fg(pulse((52, 211, 153), s.tick))),
+            Span::styled(
+                "awake ",
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            ),
+        ]))
+        .title_alignment(Alignment::Left);
     let inner = block.inner(brect);
     block.render(brect, buf);
     Paragraph::new(lines).render(inner, buf);
@@ -372,12 +382,15 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
             width: area.width,
             height: 1,
         };
-        Paragraph::new(Line::from(Span::styled(
-            "q — let it sleep",
-            Style::default()
-                .fg(SLATE_600)
-                .add_modifier(Modifier::ITALIC),
-        )))
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                " q ",
+                Style::default()
+                    .fg(VIOLET_LIGHT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("release & let it sleep", Style::default().fg(SLATE_600)),
+        ]))
         .alignment(Alignment::Center)
         .render(hint, buf);
     }
@@ -402,11 +415,11 @@ fn draw_compact(f: &mut Frame, s: &ViewState) {
             )
         })
         .collect();
-    let mut status = format!("awake {}", fmt_hms(s.elapsed));
+    let mut status = format!("● awake {}", fmt_hms(s.elapsed));
     if let Some(r) = s.remaining {
         status.push_str(&format!(" · {} left", fmt_hms(r)));
     }
-    status.push_str(" · q to sleep");
+    status.push_str(" · q release");
 
     let ctx = sky::Ctx { tick: s.tick, area };
     let buf = f.buffer_mut();
@@ -445,44 +458,67 @@ fn draw_compact(f: &mut Frame, s: &ViewState) {
 /// The status card body. `folded` lists cards that didn't fit as cards and
 /// appear here as one-line summaries instead.
 fn status_lines(s: &ViewState, folded: &[usize], display_width: u16) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::default(), badges(s), Line::default()];
-    lines.push(row(
-        "awake",
-        vec![Span::styled(
-            fmt_hms(s.elapsed),
-            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
-        )],
-    ));
+    let inner_w = display_width.saturating_sub(2) as usize;
+    let mut lines = vec![Line::default(), watch_header(s, inner_w), Line::default()];
+
     match s.remaining {
         Some(r) => {
-            lines.push(row(
-                "until",
+            lines.push(split_line(
+                vec![
+                    Span::raw("   "),
+                    Span::styled(
+                        format!("{} awake", fmt_hms(s.elapsed)),
+                        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                    ),
+                ],
                 vec![Span::styled(
-                    fmt_hms(r),
+                    format!("{} remaining", fmt_hms(r)),
                     Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                 )],
+                inner_w,
             ));
             let total = s.total.unwrap_or(r).as_secs_f32().max(1.0);
-            let frac = (r.as_secs_f32() / total).clamp(0.0, 1.0);
-            let width = display_width.saturating_sub(16) as usize;
-            let filled = (frac * width as f32).round() as usize;
+            let elapsed_frac = (1.0 - r.as_secs_f32() / total).clamp(0.0, 1.0);
+            lines.push(timeline(elapsed_frac, inner_w));
+        }
+        None => {
             lines.push(Line::from(vec![
                 Span::raw("   "),
-                Span::styled("▰".repeat(filled), Style::default().fg(VIOLET_LIGHT)),
-                Span::styled("▱".repeat(width - filled), Style::default().fg(SLATE_700)),
+                Span::styled(
+                    fmt_hms(s.elapsed),
+                    Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" awake", Style::default().fg(SLATE_400)),
+            ]));
+            let rail_w = inner_w.saturating_sub(8);
+            lines.push(Line::from(vec![
+                Span::raw("   "),
+                Span::styled("━".repeat(rail_w / 2), Style::default().fg(VIOLET_LIGHT)),
+                Span::styled("◆", Style::default().fg(GOLD)),
+                Span::styled(
+                    "━".repeat(rail_w.saturating_sub(rail_w / 2 + 1)),
+                    Style::default().fg(SLATE_700),
+                ),
+                Span::styled(" ∞", Style::default().fg(SLATE_400)),
             ]));
         }
-        None => lines.push(row(
-            "until",
-            vec![Span::styled(
-                "forever",
-                Style::default()
-                    .fg(SLATE_400)
-                    .add_modifier(Modifier::ITALIC),
-            )],
-        )),
     }
-    lines.push(row("power", power_spans(&s.power)));
+    lines.push(split_line(
+        {
+            let mut spans = vec![Span::raw("   ")];
+            spans.extend(power_spans(&s.power));
+            spans
+        },
+        vec![Span::styled(
+            if s.remaining.is_some() {
+                "auto release armed"
+            } else {
+                "manual release"
+            },
+            Style::default().fg(SLATE_600),
+        )],
+        inner_w,
+    ));
 
     let mut extra = Vec::new();
     for &i in folded {
@@ -502,7 +538,17 @@ fn status_lines(s: &ViewState, folded: &[usize], display_width: u16) -> Vec<Line
                 Style::default().fg(RED),
             ));
         }
-        extra.push(row(&cards::truncate(&card.title, 9), spans));
+        extra.push(split_line(
+            vec![
+                Span::raw("   "),
+                Span::styled(
+                    format!("{} {}", card.glyph, cards::truncate(&card.title, 18)),
+                    Style::default().fg(scale(card.accent, 1.0)),
+                ),
+            ],
+            spans,
+            inner_w,
+        ));
     }
     if !extra.is_empty() {
         lines.push(Line::default());
@@ -511,18 +557,42 @@ fn status_lines(s: &ViewState, folded: &[usize], display_width: u16) -> Vec<Line
     lines
 }
 
-fn row(label: &str, value: Vec<Span<'static>>) -> Line<'static> {
-    let mut spans = vec![
-        Span::raw("   "),
-        Span::styled(format!("{label:<9}"), Style::default().fg(SLATE_500)),
-    ];
-    spans.extend(value);
-    Line::from(spans)
+fn split_line(
+    mut left: Vec<Span<'static>>,
+    right: Vec<Span<'static>>,
+    width: usize,
+) -> Line<'static> {
+    const RIGHT_PAD: usize = 3;
+    let used = span_width(&left) + span_width(&right) + RIGHT_PAD;
+    left.push(Span::raw(" ".repeat(width.saturating_sub(used))));
+    left.extend(right);
+    left.push(Span::raw(" ".repeat(RIGHT_PAD)));
+    Line::from(left)
 }
 
-fn badges(s: &ViewState) -> Line<'static> {
-    let mut spans = vec![Span::raw("   ")];
+fn span_width(spans: &[Span<'static>]) -> usize {
+    spans.iter().map(|span| span.content.chars().count()).sum()
+}
+
+fn watch_header(s: &ViewState, width: usize) -> Line<'static> {
+    let left = vec![
+        Span::raw("   "),
+        Span::styled(
+            "NIGHT WATCH",
+            Style::default()
+                .fg(VIOLET_LIGHT)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ];
+    split_line(left, mode_spans(s), width)
+}
+
+fn mode_spans(s: &ViewState) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
     for (i, kind) in s.kinds.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("  ", Style::default().fg(SLATE_700)));
+        }
         let rgb = match kind {
             Kind::Display => (56, 189, 248),
             Kind::Idle => (52, 211, 153),
@@ -537,23 +607,46 @@ fn badges(s: &ViewState) -> Line<'static> {
             format!(" {}", kind.label()),
             Style::default().fg(SLATE_400),
         ));
-        spans.push(Span::raw("  "));
     }
+    spans
+}
+
+fn timeline(frac: f32, width: usize) -> Line<'static> {
+    let rail_w = width.saturating_sub(8);
+    let marker = if rail_w > 0 {
+        (frac * rail_w.saturating_sub(1) as f32).round() as usize
+    } else {
+        0
+    };
+    let mut spans = vec![
+        Span::raw("   "),
+        Span::styled("━".repeat(marker), Style::default().fg(VIOLET_LIGHT)),
+        Span::styled("◆", Style::default().fg(GOLD)),
+    ];
+    spans.push(Span::styled(
+        "─".repeat(rail_w.saturating_sub(marker + 1)),
+        Style::default().fg(SLATE_700),
+    ));
+    let percent = (frac * 100.0).round() as u8;
+    spans.push(Span::styled(
+        format!(" {percent:>3}%"),
+        Style::default().fg(SLATE_400),
+    ));
     Line::from(spans)
 }
 
 fn power_spans(p: &PowerStatus) -> Vec<Span<'static>> {
     if p.on_ac {
         let label = match p.percent {
-            Some(pc) => format!("ac power · {pc}%"),
-            None => "ac power".into(),
+            Some(pc) => format!("↯ ac power · {pc}%"),
+            None => "↯ ac power".into(),
         };
         vec![Span::styled(label, Style::default().fg(EMERALD))]
     } else {
         let (label, color) = match p.percent {
-            Some(pc) if pc < 20 => (format!("battery · {pc}%"), RED),
-            Some(pc) => (format!("battery · {pc}%"), AMBER),
-            None => ("battery".into(), AMBER),
+            Some(pc) if pc < 20 => (format!("◐ battery · {pc}%"), RED),
+            Some(pc) => (format!("◐ battery · {pc}%"), AMBER),
+            None => ("◐ battery".into(), AMBER),
         };
         vec![Span::styled(label, Style::default().fg(color))]
     }
@@ -567,6 +660,21 @@ impl Widget for Title {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let x0 = area.x + area.width.saturating_sub(art::TITLE_W) / 2;
         let shift = self.tick as f32 * 0.006;
+
+        // Give the compact wordmark quiet negative space when a comet crosses
+        // the title while leaving the surrounding sky alive.
+        for y in area.y..area.bottom() {
+            for x in
+                (x0 + art::WORDMARK_X)..(x0 + art::WORDMARK_X + art::WORDMARK_W).min(area.right())
+            {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    cell.set_char(' ');
+                    cell.set_fg(ratatui::style::Color::Reset);
+                    cell.set_bg(ratatui::style::Color::Reset);
+                }
+            }
+        }
+
         for (dy, line) in art::TITLE.iter().enumerate() {
             let y = area.y + dy as u16;
             for (dx, ch) in line.chars().enumerate() {
@@ -575,10 +683,10 @@ impl Widget for Title {
                 }
                 let x = x0 + dx as u16;
                 let t = tri(dx as f32 / (art::TITLE_W - 1) as f32 + shift);
-                let color = if ch == '█' {
-                    gradient(t)
-                } else {
-                    scale(gradient_rgb(t), 0.45)
+                let color = match ch {
+                    '☾' => GOLD,
+                    '·' | '˚' => scale(gradient_rgb(t), 0.45),
+                    _ => gradient(t),
                 };
                 if let Some(cell) = buf.cell_mut((x, y)) {
                     cell.set_char(ch);
@@ -665,6 +773,37 @@ mod tests {
                 let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
                 terminal.draw(|f| draw(f, &state(cards, merged))).unwrap();
             }
+        }
+    }
+
+    #[test]
+    fn night_watch_rows_respect_the_card_width() {
+        let bounded = state(vec![], false);
+        let mut unbounded = state(vec![], false);
+        unbounded.total = None;
+        unbounded.remaining = None;
+        for box_width in [MAIN_W, MAIN_MAX_W, 100] {
+            let inner = box_width as usize - 2;
+            for s in [&bounded, &unbounded] {
+                for line in status_lines(s, &[], box_width) {
+                    let width: usize = line
+                        .spans
+                        .iter()
+                        .map(|span| span.content.chars().count())
+                        .sum();
+                    assert!(
+                        width <= inner,
+                        "status row is {width} cells in {inner}: {line:?}"
+                    );
+                }
+            }
+            let lines = status_lines(&bounded, &[], box_width);
+            let progress: String = lines[4]
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+            assert!(progress.ends_with("  35%"), "{progress}");
         }
     }
 }
