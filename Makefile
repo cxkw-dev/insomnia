@@ -4,7 +4,7 @@
 # after changing code, `make install` rebuilds and replaces it so the next
 # launch runs what you just wrote.
 
-.PHONY: install run check test preview
+.PHONY: install run check test preview macos
 
 install:
 	cargo install --path . --quiet
@@ -22,3 +22,6 @@ test:
 
 preview:
 	cargo run --quiet --example preview 110 46 7
+
+macos:
+	sh macos/build.sh

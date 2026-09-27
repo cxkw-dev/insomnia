@@ -10,6 +10,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Duration;
 
+use serde::Serialize;
+
 use crate::config::{accent_rgb, CardConfig};
 use crate::power::PowerStatus;
 
@@ -18,7 +20,8 @@ const BASE_POLL: Duration = Duration::from_secs(10);
 const MAX_ROWS: usize = 32;
 
 /// Ordered so that sorting puts the rows needing attention first.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Health {
     Bad,
     Warn,
@@ -27,8 +30,31 @@ pub enum Health {
     Off,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContainerState {
+    Running,
+    Paused,
+    Stopped,
+    Restarting,
+    Unknown,
+}
+
+impl ContainerState {
+    pub fn from_docker(state: &str) -> Self {
+        match state {
+            "running" => Self::Running,
+            "paused" => Self::Paused,
+            "exited" | "dead" | "created" => Self::Stopped,
+            "restarting" => Self::Restarting,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Container {
+    pub state: ContainerState,
     pub name: String,
     pub status: String,
     pub health: Health,
@@ -36,8 +62,9 @@ pub struct Container {
 
 /// One row of a custom card, parsed from a line of command output. The
 /// default value is a blank spacer row: no dot, no text, no meter.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct CardRow {
+    pub container_state: Option<ContainerState>,
     pub health: Option<Health>,
     pub name: String,
     pub detail: Option<String>,
@@ -105,7 +132,12 @@ pub fn spawn(docker: bool, cards: Vec<CardConfig>) -> Receiver<Update> {
 
 fn poll_docker() -> Option<Vec<Container>> {
     let out = Command::new("docker")
-        .args(["ps", "--format", "{{.Names}}\t{{.State}}\t{{.Status}}"])
+        .args([
+            "ps",
+            "--all",
+            "--format",
+            "{{.Names}}\t{{.State}}\t{{.Status}}",
+        ])
         .output()
         .ok()?;
     if !out.status.success() {
@@ -122,23 +154,40 @@ fn parse_container(line: &str) -> Option<Container> {
     let name = parts.next()?.to_string();
     let state = parts.next()?;
     let status = parts.next().unwrap_or_default();
-    let health = if status.contains("(unhealthy)") || state == "exited" || state == "dead" {
+    let health = if status.contains("(unhealthy)") || state == "dead" {
         Health::Bad
+    } else if state == "exited" {
+        if status.starts_with("Exited (0)") {
+            Health::Off
+        } else {
+            Health::Bad
+        }
+    } else if state == "created" {
+        Health::Off
     } else if state == "running" && !status.contains("health: starting") {
         Health::Good
     } else {
         Health::Warn
     };
-    // The dot carries health in the UI, so drop the "(healthy)" parenthetical.
-    let status = status.split(" (").next().unwrap_or(status).to_lowercase();
+    // Show lifecycle state explicitly and retain health checks and exit codes.
+    let label = if state == "exited" { "stopped" } else { state };
+    let status = status.to_lowercase();
+    let status = if status.is_empty() {
+        label.to_string()
+    } else if status.starts_with(label) {
+        status
+    } else {
+        format!("{label} · {status}")
+    };
     Some(Container {
+        state: ContainerState::from_docker(state),
         name,
         status,
         health,
     })
 }
 
-fn poll_card(cfg: &CardConfig) -> Option<CardData> {
+pub fn poll_card(cfg: &CardConfig) -> Option<CardData> {
     let out = Command::new("sh")
         .args(["-c", &cfg.command])
         .output()
@@ -282,13 +331,54 @@ mod tests {
     fn containers_parse_and_classify() {
         let c = parse_container("web\trunning\tUp 3 hours (healthy)").unwrap();
         assert_eq!(c.health, Health::Good);
-        assert_eq!(c.status, "up 3 hours");
+        assert_eq!(c.status, "running · up 3 hours (healthy)");
 
         let c = parse_container("db\trunning\tUp 2 minutes (unhealthy)").unwrap();
         assert_eq!(c.health, Health::Bad);
+        assert_eq!(c.status, "running · up 2 minutes (unhealthy)");
 
         let c = parse_container("job\trunning\tUp 1 second (health: starting)").unwrap();
         assert_eq!(c.health, Health::Warn);
+        assert_eq!(c.status, "running · up 1 second (health: starting)");
+
+        for (state, status, label, health) in [
+            (
+                "running",
+                "Up 3 hours",
+                "running · up 3 hours",
+                Health::Good,
+            ),
+            (
+                "exited",
+                "Exited (0) 2 hours ago",
+                "stopped · exited (0) 2 hours ago",
+                Health::Off,
+            ),
+            (
+                "exited",
+                "Exited (1) 2 hours ago",
+                "stopped · exited (1) 2 hours ago",
+                Health::Bad,
+            ),
+            (
+                "paused",
+                "Up 3 hours (Paused)",
+                "paused · up 3 hours (paused)",
+                Health::Warn,
+            ),
+            (
+                "restarting",
+                "Restarting (1) 5 seconds ago",
+                "restarting (1) 5 seconds ago",
+                Health::Warn,
+            ),
+            ("created", "Created", "created", Health::Off),
+            ("dead", "Dead", "dead", Health::Bad),
+        ] {
+            let c = parse_container(&format!("worker\t{state}\t{status}")).unwrap();
+            assert_eq!(c.status, label);
+            assert_eq!(c.health, health);
+        }
 
         assert!(parse_container("garbage-no-tabs").is_none());
     }

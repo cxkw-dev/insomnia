@@ -58,11 +58,24 @@ pub fn resolve(toggles: &std::collections::HashMap<String, bool>) -> Vec<bool> {
 /// Draw the whole sky: the ambient starfield and glint stars, then every
 /// enabled flyer from the registry.
 pub fn render(ctx: &Ctx, enabled: &[bool], buf: &mut Buffer) {
-    starfield(ctx.tick, ctx.area, buf);
-    sparkles(ctx.tick, ctx.area, buf);
+    render_motion(ctx, enabled, true, buf);
+}
+
+/// With motion off only the fixed starfield remains. Data and timers keep
+/// updating; decorative motion never needs to be running to use the app.
+pub fn render_motion(ctx: &Ctx, enabled: &[bool], motion: bool, buf: &mut Buffer) {
+    let calm = Ctx {
+        tick: if motion { ctx.tick / 3 + 83 } else { 0 },
+        area: ctx.area,
+    };
+    starfield(calm.tick, calm.area, buf);
+    if !motion {
+        return;
+    }
+    sparkles(calm.tick, calm.area, buf);
     for (flyer, on) in FLYERS.iter().zip(enabled) {
         if *on {
-            (flyer.draw)(ctx, buf);
+            (flyer.draw)(&calm, buf);
         }
     }
 }
@@ -81,8 +94,8 @@ fn mix(x: u32, y: u32) -> u32 {
 // Two depth layers, both stationary: far stars are dim, near stars bright
 // and colorful. Only their brightness animates.
 fn starfield(tick: u64, area: Rect, buf: &mut Buffer) {
-    star_pass(area, buf, tick, 41, &['·', '.', '˚'], false);
-    star_pass(area, buf, tick, 53, &['·', '˚', '✦', '⋆', '✧'], true);
+    star_pass(area, buf, tick, 181, &['·', '.', '˚'], false);
+    star_pass(area, buf, tick, 397, &['·', '˚', '✦'], true);
 }
 
 fn star_pass(area: Rect, buf: &mut Buffer, tick: u64, density: u32, chars: &[char], near: bool) {
@@ -124,11 +137,11 @@ fn near_star_color(level: u32, h: u32) -> Color {
         4..=6 => SLATE_500,
         7..=10 => match tint {
             Some(rgb) => crate::theme::scale(rgb, 0.6),
-            None => SLATE_400,
+            None => SLATE_500,
         },
         _ => match tint {
-            Some(rgb) => Color::Rgb(rgb.0, rgb.1, rgb.2),
-            None => TEXT,
+            Some(rgb) => crate::theme::scale(rgb, 0.55),
+            None => SLATE_400,
         },
     }
 }
@@ -148,7 +161,7 @@ fn sparkles(tick: u64, area: Rect, buf: &mut Buffer) {
     for y in area.top()..area.bottom() {
         for x in area.left()..area.right() {
             let h = mix(x as u32 + 131, y as u32 + 977);
-            if !h.is_multiple_of(599) {
+            if !h.is_multiple_of(1913) {
                 continue;
             }
             let phase = ((h >> 7) as u64) % CYCLE;
@@ -306,6 +319,17 @@ fn shooting_stars(ctx: &Ctx, buf: &mut Buffer) {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn motion_off_keeps_the_entire_sky_static() {
+        let area = Rect::new(0, 0, 110, 46);
+        let enabled = vec![true; FLYERS.len()];
+        let mut first = Buffer::empty(area);
+        let mut later = Buffer::empty(area);
+        render_motion(&Ctx { tick: 1, area }, &enabled, false, &mut first);
+        render_motion(&Ctx { tick: 1000, area }, &enabled, false, &mut later);
+        assert_eq!(first, later);
+    }
 
     #[test]
     fn resolve_defaults_on_and_honors_toggles() {

@@ -121,7 +121,7 @@ pub struct FileConfig {
 /// header in that card's glyph and accent, so the whole app is one box.
 /// The box expands responsively up to the renderer's comfortable reading
 /// width. Title, glyph, accent, and side are then unused.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DashboardConfig {
     pub combined: bool,
@@ -129,6 +129,18 @@ pub struct DashboardConfig {
     pub glyph: Option<String>,
     pub accent: Option<String>,
     pub side: Option<String>,
+}
+
+impl Default for DashboardConfig {
+    fn default() -> Self {
+        Self {
+            combined: true,
+            title: None,
+            glyph: None,
+            accent: None,
+            side: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -250,7 +262,7 @@ fn parse_file(text: &str) -> Result<FileConfig, String> {
         }
     }
     for key in cfg.sky.keys() {
-        if !sky::names().any(|n| n == key) {
+        if key != "motion" && !sky::names().any(|n| n == key) {
             let known: Vec<&str> = sky::names().collect();
             return Err(format!(
                 "[sky]: unknown flyer '{key}' (the sky holds {})",
@@ -403,6 +415,7 @@ mod tests {
         assert!(cfg.docker.enabled);
         assert!(cfg.cards.is_empty());
         assert!(cfg.sky.is_empty());
+        assert!(cfg.dashboard.combined);
     }
 
     #[test]
@@ -428,6 +441,15 @@ interval = 30
         assert_eq!(cfg.sky.get("comets"), Some(&false));
         assert_eq!(cfg.cards.len(), 1);
         assert_eq!(cfg.cards[0].interval, 30);
+    }
+
+    #[test]
+    fn motion_can_be_disabled_without_changing_flyer_configuration() {
+        let cfg = parse_file("[sky]\nmotion = false\ncomets = true\n[dashboard]\ncombined = false")
+            .unwrap();
+        assert_eq!(cfg.sky.get("motion"), Some(&false));
+        assert!(sky::resolve(&cfg.sky)[0]);
+        assert!(!cfg.dashboard.combined);
     }
 
     #[test]

@@ -25,11 +25,12 @@ use crate::art;
 use crate::cards::{self, SideCard};
 use crate::collect::{self, CardData, Container, Health, Update};
 use crate::config::{Config, FileConfig};
+use crate::dashboard::{Dashboard, Navigation};
 use crate::power::{Kind, PowerStatus};
 use crate::sky;
 use crate::theme::{
-    gradient, gradient_rgb, pulse, scale, tri, AMBER, EMERALD, GOLD, RED, SLATE_400, SLATE_600,
-    SLATE_700, TEXT, VIOLET_LIGHT,
+    scale, AMBER, BACKGROUND, BORDER, EMERALD, GOLD, MUTED, RED, SLATE_400, SLATE_600, SLATE_700,
+    TEXT, VIOLET_LIGHT,
 };
 
 const MAIN_W: u16 = 64;
@@ -54,6 +55,8 @@ pub struct ViewState {
     pub merged: bool,
     /// Per-flyer sky toggles, aligned with [`sky::FLYERS`].
     pub sky: Vec<bool>,
+    pub motion: bool,
+    pub navigation: Navigation,
 }
 
 pub fn run(cfg: &Config, kinds: &[Kind], fc: &FileConfig) -> io::Result<Duration> {
@@ -70,6 +73,8 @@ pub fn run(cfg: &Config, kinds: &[Kind], fc: &FileConfig) -> io::Result<Duration
     let deadline = cfg.timeout.map(|t| start + t);
     let updates = collect::spawn(fc.docker.enabled, fc.cards.clone());
     let sky_on = sky::resolve(&fc.sky);
+    let mut motion = *fc.sky.get("motion").unwrap_or(&true);
+    let mut navigation = Navigation::default();
     let mut power = PowerStatus::poll();
     let mut docker: Option<Vec<Container>> = None;
     let mut card_data: Vec<Option<CardData>> = vec![None; fc.cards.len()];
@@ -89,6 +94,9 @@ pub fn run(cfg: &Config, kinds: &[Kind], fc: &FileConfig) -> io::Result<Duration
                 Update::Card(i, d) => card_data[i] = d,
             }
         }
+        let cards = cards::build_cards(&fc.cards, &docker, &card_data, &fc.dashboard);
+        let dashboard = Dashboard::from_cards(&cards, fc.dashboard.combined);
+        navigation.sync(&dashboard);
         let state = ViewState {
             tick,
             elapsed: start.elapsed(),
@@ -96,15 +104,32 @@ pub fn run(cfg: &Config, kinds: &[Kind], fc: &FileConfig) -> io::Result<Duration
             remaining: deadline.map(|d| d.saturating_duration_since(now)),
             kinds: kinds.to_vec(),
             power: power.clone(),
-            cards: cards::build_cards(&fc.cards, &docker, &card_data, &fc.dashboard),
+            cards,
             merged: fc.dashboard.combined,
             sky: sky_on.clone(),
+            motion,
+            navigation: navigation.clone(),
         };
-        if let Err(e) = terminal.draw(|f| draw(f, &state)) {
+        let mut viewport = None;
+        if let Err(e) = terminal.draw(|f| {
+            if state.merged {
+                viewport = draw_focused(f, &state);
+            } else {
+                draw(f, &state);
+            }
+        }) {
             break Err(e);
         }
-        if event::poll(Duration::from_millis(120))? {
-            if let Event::Key(key) = event::read()? {
+        let ready = match event::poll(Duration::from_millis(if motion { 120 } else { 250 })) {
+            Ok(ready) => ready,
+            Err(error) => break Err(error),
+        };
+        if ready {
+            let event = match event::read() {
+                Ok(event) => event,
+                Err(error) => break Err(error),
+            };
+            if let Event::Key(key) = event {
                 if key.kind == KeyEventKind::Press {
                     let quit = matches!(
                         key.code,
@@ -113,6 +138,32 @@ pub fn run(cfg: &Config, kinds: &[Kind], fc: &FileConfig) -> io::Result<Duration
                         && key.modifiers.contains(KeyModifiers::CONTROL));
                     if quit {
                         break Ok(());
+                    }
+                    if matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M')) {
+                        motion = !motion;
+                    }
+                    if fc.dashboard.combined {
+                        match key.code {
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                navigation.move_selection(&dashboard, 1)
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                navigation.move_selection(&dashboard, -1)
+                            }
+                            KeyCode::PageDown => {
+                                if let Some(viewport) = &viewport {
+                                    navigation.scroll =
+                                        viewport.page(viewport.height.max(1) as isize);
+                                }
+                            }
+                            KeyCode::PageUp => {
+                                if let Some(viewport) = &viewport {
+                                    navigation.scroll =
+                                        viewport.page(-(viewport.height.max(1) as isize));
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                 }
             }
@@ -158,6 +209,13 @@ fn place_column(
 
 pub fn draw(f: &mut Frame, s: &ViewState) {
     let area = f.area();
+
+    f.buffer_mut()
+        .set_style(area, Style::default().bg(BACKGROUND).fg(TEXT));
+    if s.merged {
+        draw_focused(f, s);
+        return;
+    }
 
     if area.width < 66 || area.height < 18 {
         draw_compact(f, s);
@@ -245,7 +303,7 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
 
     let mut lines = status_lines(s, &folded, bw);
     if let Some(card) = merged_card {
-        // As many rows as the height allows, then a "+N more" line.
+        // As many rows as the height allows, then a "+N MORE" line.
         let budget = area.height.saturating_sub(art::TITLE_H + 1 + 2 + 2 + 3) as usize;
         let base = lines.len() + 1;
         let n = card.rows.len();
@@ -351,18 +409,19 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
 
     let ctx = sky::Ctx { tick: s.tick, area };
     let buf = f.buffer_mut();
-    sky::render(&ctx, &s.sky, buf);
+    sky::render_motion(&ctx, &s.sky, s.motion, buf);
 
     Title { tick: s.tick }.render(title_rect, buf);
 
     Clear.render(brect, buf);
+    buf.set_style(brect, Style::default().bg(BACKGROUND));
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(scale((139, 92, 246), 0.8)))
+        .border_style(Style::default().fg(BORDER))
         .title(Line::from(vec![
-            Span::styled(" ● ", Style::default().fg(pulse((52, 211, 153), s.tick))),
+            Span::styled(" ● ", Style::default().fg(EMERALD)),
             Span::styled(
-                "awake ",
+                "AWAKE ",
                 Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ),
         ]))
@@ -372,7 +431,13 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
     Paragraph::new(lines).render(inner, buf);
 
     for (i, rect, shown) in &side_rects {
-        cards::render_side_card(&s.cards[*i], *shown, *rect, s.tick, buf);
+        cards::render_side_card(
+            &s.cards[*i],
+            *shown,
+            *rect,
+            if s.motion { s.tick } else { 0 },
+            buf,
+        );
     }
 
     if hint_y < area.bottom() {
@@ -384,16 +449,222 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
         };
         Paragraph::new(Line::from(vec![
             Span::styled(
-                " q ",
+                " Q ",
                 Style::default()
                     .fg(VIOLET_LIGHT)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("release & let it sleep", Style::default().fg(SLATE_600)),
+            Span::styled("RELEASE & LET IT SLEEP", Style::default().fg(SLATE_600)),
         ]))
         .alignment(Alignment::Center)
         .render(hint, buf);
     }
+}
+
+/// The session stays anchored while the dashboard scrolls independently.
+struct Viewport {
+    start: usize,
+    base: usize,
+    max: usize,
+    height: usize,
+}
+
+impl Viewport {
+    fn page(&self, step: isize) -> isize {
+        self.start.saturating_add_signed(step).min(self.max) as isize - self.base as isize
+    }
+}
+
+fn draw_focused(f: &mut Frame, s: &ViewState) -> Option<Viewport> {
+    let area = f.area();
+    f.buffer_mut()
+        .set_style(area, Style::default().bg(BACKGROUND).fg(TEXT));
+    if area.width < 32 || area.height < 14 {
+        draw_compact(f, s);
+        return None;
+    }
+    let width = area.width.saturating_sub(4).min(110);
+    let content_w = width.saturating_sub(8) as usize;
+    let dashboard = Dashboard::from_cards(&s.cards, true);
+    let rows =
+        dashboard.render_animated(&s.navigation, content_w, if s.motion { s.tick } else { 0 });
+    let mut header = focused_status(s, content_w);
+    if !rows.lines.is_empty() {
+        header.push(Line::default());
+        header.push(Line::from(Span::styled(
+            "─".repeat(content_w),
+            Style::default().fg(BORDER),
+        )));
+        header.push(Line::default());
+    }
+    let max_height = area.height.saturating_sub(6);
+    let panel_height = (header.len() + rows.lines.len() + 4).min(max_height as usize) as u16;
+    let panel = Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + 3,
+        width,
+        panel_height,
+    );
+    let body = Rect::new(
+        panel.x + 4,
+        panel.y + 2,
+        width.saturating_sub(8),
+        panel.height.saturating_sub(4),
+    );
+    let dashboard_height = (body.height as usize).saturating_sub(header.len());
+    let overflow = rows.lines.len() > dashboard_height;
+    let visible = dashboard_height.saturating_sub(usize::from(overflow));
+    let start = rows.start(visible, s.navigation.scroll);
+    let mut lines = header;
+    lines.extend(rows.lines.iter().skip(start).take(visible).cloned());
+    if overflow && dashboard_height > 0 {
+        let end = (start + visible).min(rows.lines.len());
+        lines.push(Line::from(Span::styled(
+            cards::truncate(
+                &format!(
+                    "{}–{} OF {} · PGUP/PGDN SCROLL",
+                    start + 1,
+                    end,
+                    rows.lines.len()
+                ),
+                content_w,
+            ),
+            Style::default().fg(MUTED),
+        )));
+    }
+    let buf = f.buffer_mut();
+    sky::render_motion(&sky::Ctx { tick: s.tick, area }, &s.sky, s.motion, buf);
+    // A clear margin separates moving sky cells from the frame and title.
+    let quiet = Rect::new(
+        panel.x.saturating_sub(1),
+        panel.y.saturating_sub(1),
+        panel.width + 2,
+        panel.height + 2,
+    )
+    .intersection(area);
+    Clear.render(quiet, buf);
+    buf.set_style(quiet, Style::default().bg(BACKGROUND).fg(TEXT));
+    let title = Rect::new(area.x, area.y + 1, area.width, 1);
+    Title { tick: 0 }.render(title, buf);
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(BORDER))
+        .render(panel, buf);
+    Paragraph::new(lines).render(body, buf);
+    let motion = if s.motion { "ON" } else { "OFF" };
+    let hint = if content_w >= 62 && dashboard.entries().next().is_some() {
+        format!("↑↓ NAVIGATE   PGUP/PGDN SCROLL   M MOTION:{motion}   Q RELEASE")
+    } else if dashboard.entries().next().is_some() {
+        "↑↓ NAVIGATE · PGUP/PGDN · M · Q".into()
+    } else {
+        format!("M MOTION:{motion}   Q RELEASE & LET IT SLEEP")
+    };
+    let hint_area = Rect::new(
+        area.x + 1,
+        area.bottom().saturating_sub(2),
+        area.width.saturating_sub(2),
+        1,
+    );
+    Clear.render(hint_area, buf);
+    buf.set_style(hint_area, Style::default().bg(BACKGROUND));
+    Paragraph::new(Line::from(Span::styled(
+        cards::truncate(&hint, hint_area.width as usize),
+        Style::default().fg(MUTED),
+    )))
+    .alignment(Alignment::Center)
+    .render(hint_area, buf);
+    Some(Viewport {
+        start,
+        base: rows.start(visible, 0),
+        max: rows.lines.len().saturating_sub(visible),
+        height: visible,
+    })
+}
+
+fn focused_status(s: &ViewState, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        crate::dashboard::pair("NIGHT WATCH", "● AWAKE", width, VIOLET_LIGHT, EMERALD),
+        Line::default(),
+    ];
+    let time = match s.remaining {
+        Some(remaining) => format!("{} REMAINING", fmt_hms(remaining)),
+        None => format!("{} AWAKE", fmt_hms(s.elapsed)),
+    };
+    if s.remaining.is_some() && width >= 48 {
+        lines.push(crate::dashboard::pair(
+            &time,
+            &format!("{} ELAPSED", fmt_hms(s.elapsed)),
+            width,
+            TEXT,
+            MUTED,
+        ));
+    } else {
+        lines.push(Line::from(Span::styled(
+            time,
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        )));
+    }
+    if let (Some(remaining), Some(total)) = (s.remaining, s.total) {
+        let fraction =
+            (1.0 - remaining.as_secs_f32() / total.as_secs_f32().max(1.0)).clamp(0.0, 1.0);
+        let rail = width.saturating_sub(5);
+        let filled = (fraction * rail.saturating_sub(1) as f32).round() as usize;
+        lines.push(Line::from(vec![
+            Span::styled("━".repeat(filled), Style::default().fg(VIOLET_LIGHT)),
+            Span::styled("◆", Style::default().fg(VIOLET_LIGHT)),
+            Span::styled(
+                "─".repeat(rail.saturating_sub(filled + 1)),
+                Style::default().fg(BORDER),
+            ),
+            Span::styled(
+                format!(" {:>3}%", (fraction * 100.0).round() as u8),
+                Style::default().fg(MUTED),
+            ),
+        ]));
+    }
+    lines.push(Line::default());
+    let held = format!(
+        "{} HELD",
+        s.kinds
+            .iter()
+            .map(|k| k.label().to_uppercase())
+            .collect::<Vec<_>>()
+            .join(" + ")
+    );
+    let release = if s.remaining.is_some() {
+        "RELEASES AUTOMATICALLY"
+    } else {
+        "UNTIL YOU RELEASE"
+    };
+    if Line::from(held.as_str()).width() + release.len() + 2 <= width {
+        lines.push(crate::dashboard::pair(&held, release, width, MUTED, MUTED));
+    } else {
+        lines.push(Line::from(Span::styled(
+            cards::truncate(&held, width),
+            Style::default().fg(MUTED),
+        )));
+        lines.push(Line::from(Span::styled(
+            cards::truncate(release, width),
+            Style::default().fg(MUTED),
+        )));
+    }
+    let power = match (s.power.on_ac, s.power.percent) {
+        (true, Some(percent)) => format!("AC POWER · BATTERY {percent}%"),
+        (true, None) => "AC POWER".into(),
+        (false, Some(percent)) => format!("BATTERY {percent}%"),
+        (false, None) => "BATTERY".into(),
+    };
+    lines.push(Line::from(Span::styled(
+        cards::truncate(&power, width),
+        Style::default().fg(
+            if s.power.percent.is_some_and(|p| p < 20) && !s.power.on_ac {
+                AMBER
+            } else {
+                MUTED
+            },
+        ),
+    )));
+    lines
 }
 
 /// The single-line layout for terminals too small for the full art: the sky
@@ -401,29 +672,19 @@ pub fn draw(f: &mut Frame, s: &ViewState) {
 fn draw_compact(f: &mut Frame, s: &ViewState) {
     let area = f.area();
     let mid = area.y + area.height / 2;
-    let name = "☾  I N S O M N I A";
-    let n = name.chars().count();
-    let spans: Vec<Span> = name
-        .chars()
-        .enumerate()
-        .map(|(i, c)| {
-            Span::styled(
-                c.to_string(),
-                Style::default()
-                    .fg(gradient(i as f32 / (n - 1) as f32))
-                    .add_modifier(Modifier::BOLD),
-            )
-        })
-        .collect();
-    let mut status = format!("● awake {}", fmt_hms(s.elapsed));
+    let spans = vec![Span::styled(
+        art::TITLE[0],
+        Style::default().fg(VIOLET_LIGHT),
+    )];
+    let mut status = format!("● AWAKE {}", fmt_hms(s.elapsed));
     if let Some(r) = s.remaining {
-        status.push_str(&format!(" · {} left", fmt_hms(r)));
+        status.push_str(&format!(" · {} LEFT", fmt_hms(r)));
     }
-    status.push_str(" · q release");
+    status.push_str(" · Q RELEASE");
 
     let ctx = sky::Ctx { tick: s.tick, area };
     let buf = f.buffer_mut();
-    sky::render(&ctx, &s.sky, buf);
+    sky::render_motion(&ctx, &s.sky, s.motion, buf);
     if mid > area.y {
         Paragraph::new(Line::from(spans))
             .alignment(Alignment::Center)
@@ -467,12 +728,12 @@ fn status_lines(s: &ViewState, folded: &[usize], display_width: u16) -> Vec<Line
                 vec![
                     Span::raw("   "),
                     Span::styled(
-                        format!("{} awake", fmt_hms(s.elapsed)),
+                        format!("{} AWAKE", fmt_hms(s.elapsed)),
                         Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                     ),
                 ],
                 vec![Span::styled(
-                    format!("{} remaining", fmt_hms(r)),
+                    format!("{} REMAINING", fmt_hms(r)),
                     Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                 )],
                 inner_w,
@@ -488,7 +749,7 @@ fn status_lines(s: &ViewState, folded: &[usize], display_width: u16) -> Vec<Line
                     fmt_hms(s.elapsed),
                     Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(" awake", Style::default().fg(SLATE_400)),
+                Span::styled(" AWAKE", Style::default().fg(SLATE_400)),
             ]));
             let rail_w = inner_w.saturating_sub(8);
             lines.push(Line::from(vec![
@@ -511,9 +772,9 @@ fn status_lines(s: &ViewState, folded: &[usize], display_width: u16) -> Vec<Line
         },
         vec![Span::styled(
             if s.remaining.is_some() {
-                "auto release armed"
+                "AUTO RELEASE ARMED"
             } else {
-                "manual release"
+                "MANUAL RELEASE"
             },
             Style::default().fg(SLATE_600),
         )],
@@ -529,12 +790,12 @@ fn status_lines(s: &ViewState, folded: &[usize], display_width: u16) -> Vec<Line
             .filter(|r| r.health == Some(Health::Bad))
             .count();
         let mut spans = vec![Span::styled(
-            card.summary.clone(),
+            card.summary.to_uppercase(),
             Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
         )];
         if bad > 0 {
             spans.push(Span::styled(
-                format!(" · {bad} bad"),
+                format!(" · {bad} BAD"),
                 Style::default().fg(RED),
             ));
         }
@@ -542,7 +803,11 @@ fn status_lines(s: &ViewState, folded: &[usize], display_width: u16) -> Vec<Line
             vec![
                 Span::raw("   "),
                 Span::styled(
-                    format!("{} {}", card.glyph, cards::truncate(&card.title, 18)),
+                    format!(
+                        "{} {}",
+                        card.glyph,
+                        cards::truncate(&card.title.to_uppercase(), 18)
+                    ),
                     Style::default().fg(scale(card.accent, 1.0)),
                 ),
             ],
@@ -599,12 +864,9 @@ fn mode_spans(s: &ViewState) -> Vec<Span<'static>> {
             Kind::System => (251, 191, 36),
             Kind::Disk => (192, 132, 252),
         };
+        spans.push(Span::styled("●", Style::default().fg(scale(rgb, 0.75))));
         spans.push(Span::styled(
-            "●",
-            Style::default().fg(pulse(rgb, s.tick + i as u64 * 8)),
-        ));
-        spans.push(Span::styled(
-            format!(" {}", kind.label()),
+            format!(" {}", kind.label().to_uppercase()),
             Style::default().fg(SLATE_400),
         ));
     }
@@ -638,15 +900,15 @@ fn timeline(frac: f32, width: usize) -> Line<'static> {
 fn power_spans(p: &PowerStatus) -> Vec<Span<'static>> {
     if p.on_ac {
         let label = match p.percent {
-            Some(pc) => format!("↯ ac power · {pc}%"),
-            None => "↯ ac power".into(),
+            Some(pc) => format!("↯ AC POWER · {pc}%"),
+            None => "↯ AC POWER".into(),
         };
         vec![Span::styled(label, Style::default().fg(EMERALD))]
     } else {
         let (label, color) = match p.percent {
-            Some(pc) if pc < 20 => (format!("◐ battery · {pc}%"), RED),
-            Some(pc) => (format!("◐ battery · {pc}%"), AMBER),
-            None => ("◐ battery".into(), AMBER),
+            Some(pc) if pc < 20 => (format!("◐ BATTERY · {pc}%"), RED),
+            Some(pc) => (format!("◐ BATTERY · {pc}%"), AMBER),
+            None => ("◐ BATTERY".into(), AMBER),
         };
         vec![Span::styled(label, Style::default().fg(color))]
     }
@@ -659,7 +921,7 @@ struct Title {
 impl Widget for Title {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let x0 = area.x + area.width.saturating_sub(art::TITLE_W) / 2;
-        let shift = self.tick as f32 * 0.006;
+        let _ = self.tick;
 
         // Give the compact wordmark quiet negative space when a comet crosses
         // the title while leaving the surrounding sky alive.
@@ -670,7 +932,7 @@ impl Widget for Title {
                 if let Some(cell) = buf.cell_mut((x, y)) {
                     cell.set_char(' ');
                     cell.set_fg(ratatui::style::Color::Reset);
-                    cell.set_bg(ratatui::style::Color::Reset);
+                    cell.set_bg(BACKGROUND);
                 }
             }
         }
@@ -682,18 +944,13 @@ impl Widget for Title {
                     continue;
                 }
                 let x = x0 + dx as u16;
-                let t = tri(dx as f32 / (art::TITLE_W - 1) as f32 + shift);
-                let color = match ch {
-                    '☾' => GOLD,
-                    '·' | '˚' => scale(gradient_rgb(t), 0.45),
-                    _ => gradient(t),
-                };
+                let color = VIOLET_LIGHT;
                 if let Some(cell) = buf.cell_mut((x, y)) {
                     cell.set_char(ch);
                     cell.set_fg(color);
                     // Clear any half-block background a trail passing behind
                     // the title left in this cell.
-                    cell.set_bg(ratatui::style::Color::Reset);
+                    cell.set_bg(BACKGROUND);
                 }
             }
         }
@@ -711,6 +968,26 @@ mod tests {
     use crate::collect::CardRow;
     use ratatui::{backend::TestBackend, Terminal};
 
+    #[test]
+    fn paging_does_not_accumulate_invisible_overscroll() {
+        let bottom = Viewport {
+            start: 20,
+            base: 5,
+            max: 20,
+            height: 8,
+        };
+        assert_eq!(bottom.page(8), 15);
+        assert_eq!(bottom.page(-8), 7);
+        let top = Viewport {
+            start: 0,
+            base: 5,
+            max: 20,
+            height: 8,
+        };
+        assert_eq!(top.page(-8), -5);
+        assert_eq!(top.page(8), 3);
+    }
+
     fn state(cards: Vec<SideCard>, merged: bool) -> ViewState {
         ViewState {
             tick: 7,
@@ -725,6 +1002,8 @@ mod tests {
             cards,
             merged,
             sky: vec![true; sky::FLYERS.len()],
+            motion: true,
+            navigation: Navigation::default(),
         }
     }
 
@@ -772,6 +1051,15 @@ mod tests {
             ] {
                 let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
                 terminal.draw(|f| draw(f, &state(cards, merged))).unwrap();
+                assert!(
+                    terminal
+                        .backend()
+                        .buffer()
+                        .content
+                        .iter()
+                        .all(|cell| { !cell.symbol().chars().any(char::is_lowercase) }),
+                    "lowercase text in {w}x{h}, merged={merged}"
+                );
             }
         }
     }

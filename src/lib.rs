@@ -16,6 +16,7 @@ pub mod art;
 pub mod cards;
 pub mod collect;
 pub mod config;
+pub mod dashboard;
 pub mod pixel;
 pub mod power;
 pub mod sky;

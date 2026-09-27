@@ -10,10 +10,10 @@ use ratatui::{
     widgets::{Block, BorderType, Clear, Paragraph, Widget},
 };
 
-use crate::collect::{CardData, CardRow, Container, Health};
+use crate::collect::{CardData, CardRow, Container, ContainerState, Health};
 use crate::config::{accent_rgb, CardConfig, DashboardConfig};
 use crate::theme::{
-    pulse, scale, HEALTH_BAD, HEALTH_GOOD, HEALTH_WARN, RED, SLATE_400, SLATE_500, SLATE_600,
+    scale, AMBER, BORDER, HEALTH_BAD, HEALTH_WARN, MUTED, RED, SLATE_400, SLATE_500, SLATE_600,
     SLATE_700, TEXT,
 };
 
@@ -22,10 +22,8 @@ use crate::theme::{
 const NAME_W: usize = 21;
 /// Widest a meter row's label column may grow.
 const METER_LABEL_W: usize = 15;
-/// A meter's gauge never grows past the max, and detail text may not
-/// squeeze it below the min.
-const GAUGE_MAX_W: usize = 14;
-const GAUGE_MIN_W: usize = 9;
+/// All meters reserve the same gauge width before laying out detail text.
+const GAUGE_MAX_W: usize = 24;
 /// Cells a meter row spends around its label and gauge: the indent, the
 /// branch rail, the label gap, and the " nnn%" value.
 const METER_CHROME: usize = 4 + 2 + 1 + 5;
@@ -88,12 +86,13 @@ pub fn build_cards(
                     .iter()
                     .map(|c| CardRow {
                         health: Some(c.health),
+                        container_state: Some(c.state),
                         name: c.name.clone(),
                         detail: Some(c.status.clone()),
                         ..CardRow::default()
                     })
                     .collect(),
-                summary: format!("{} running", containers.len()),
+                summary: format!("{} containers", containers.len()),
                 left: false,
             });
         }
@@ -214,7 +213,7 @@ pub fn render_side_card(card: &SideCard, shown: usize, rect: Rect, tick: u64, bu
             // Spacer rows are layout, not content — they don't count.
             format!(
                 "{} · {}",
-                card.title,
+                card.title.to_uppercase(),
                 card.rows.iter().filter(|r| !is_blank(r)).count()
             ),
             Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
@@ -229,7 +228,7 @@ pub fn render_side_card(card: &SideCard, shown: usize, rect: Rect, tick: u64, bu
     title.push(Span::raw(" "));
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(scale(card.accent, 0.6)))
+        .border_style(Style::default().fg(BORDER))
         .title(Line::from(title))
         .title_alignment(Alignment::Left);
     let inner = block.inner(rect);
@@ -254,6 +253,26 @@ pub fn card_row_lines(
     inner_w: usize,
     tick: u64,
 ) -> Vec<Line<'static>> {
+    card_row_lines_sized(rows, shown, inner_w, tick, GAUGE_MAX_W)
+}
+
+pub(crate) fn card_row_lines_sized(
+    rows: &[CardRow],
+    shown: usize,
+    inner_w: usize,
+    tick: u64,
+    gauge_max: usize,
+) -> Vec<Line<'static>> {
+    // Normalize display copies before measuring; source identities stay unchanged.
+    let rows: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            let mut row = row.clone();
+            row.name = row.name.to_uppercase();
+            row.detail = row.detail.map(|detail| detail.to_uppercase());
+            row
+        })
+        .collect();
     let name_w = rows
         .iter()
         .take(shown)
@@ -276,7 +295,7 @@ pub fn card_row_lines(
             section_line(r, inner_w)
         } else if let Some(percent) = r.percent {
             let continues = rows.get(i + 1).is_some_and(|next| next.percent.is_some());
-            meter_line(r, percent, continues, label_w, inner_w)
+            meter_line(r, percent, continues, label_w, inner_w, gauge_max)
         } else {
             entry_line(r, i, name_w, inner_w, tick)
         });
@@ -290,25 +309,21 @@ pub fn card_row_lines(
             ),
         ]));
     }
+    for line in &mut lines {
+        for span in &mut line.spans {
+            span.content = span.content.to_uppercase().into();
+        }
+    }
     lines
 }
 
 /// A section header: `─ title ────────` in the section's accent.
 fn section_line(r: &CardRow, inner_w: usize) -> Line<'static> {
-    let accent = r.accent.unwrap_or(DEFAULT_ACCENT);
-    let rule_w = inner_w.saturating_sub(r.name.chars().count() + 6);
     Line::from(vec![
         Span::raw("  "),
-        Span::styled("─ ", Style::default().fg(scale(accent, 0.55))),
         Span::styled(
-            r.name.clone(),
-            Style::default()
-                .fg(scale(accent, 1.0))
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" {}", "─".repeat(rule_w)),
-            Style::default().fg(scale(accent, 0.35)),
+            truncate(&r.name.to_uppercase(), inner_w.saturating_sub(4)),
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
         ),
     ])
 }
@@ -322,6 +337,7 @@ fn meter_line(
     continues: bool,
     label_w: usize,
     inner_w: usize,
+    gauge_max: usize,
 ) -> Line<'static> {
     let accent = r.accent.unwrap_or(DEFAULT_ACCENT);
     let bar_color = scale(accent, 1.0);
@@ -332,17 +348,13 @@ fn meter_line(
     };
     let detail = r.detail.as_deref().unwrap_or_default();
     let branch = if continues { "├ " } else { "╰ " };
-    // The detail takes whatever the row has left once the gauge keeps its
-    // minimum — no fixed ceiling, or a wide terminal would still clip a
-    // reset time the card has ample room for.
+    // Reset text must never change the scale of an individual gauge.
     let available = inner_w.saturating_sub(METER_CHROME + label_w);
+    let gauge_w = available.min(gauge_max);
     let detail_w = detail
         .chars()
         .count()
-        .min(available.saturating_sub(GAUGE_MIN_W + 2));
-    let gauge_w = available
-        .saturating_sub(usize::from(detail_w > 0) * 2 + detail_w)
-        .min(GAUGE_MAX_W);
+        .min(available.saturating_sub(gauge_w + 2));
     let (filled, partial, empty) = gauge_parts(percent, gauge_w);
     let mut spans = vec![
         Span::raw("    "),
@@ -375,17 +387,75 @@ fn meter_line(
     Line::from(spans)
 }
 
+/// Single-cell indicators breathe gently without changing shape or layout.
+pub fn container_badge(
+    state: ContainerState,
+    health: Option<Health>,
+    tick: u64,
+) -> (&'static str, ratatui::style::Color) {
+    if health == Some(Health::Bad) {
+        return ("×", RED);
+    }
+    // About five seconds per cycle at the normal 120 ms render cadence.
+    let brightness = 0.62 + 0.10 * ((tick % 42) as f32 / 42.0 * std::f32::consts::TAU).sin();
+    match state {
+        ContainerState::Running => (
+            "●",
+            if health == Some(Health::Warn) {
+                scale((241, 196, 119), brightness)
+            } else {
+                scale((145, 203, 181), brightness)
+            },
+        ),
+        ContainerState::Paused => ("Ⅱ", scale((241, 196, 119), 0.65)),
+        ContainerState::Stopped => ("○", SLATE_500),
+        ContainerState::Restarting => ("◌", scale((241, 196, 119), brightness)),
+        ContainerState::Unknown => ("?", SLATE_400),
+    }
+}
+
+pub fn container_detail(row: &CardRow) -> String {
+    let detail = row.detail.as_deref().unwrap_or_default();
+    // The collector's first token is the lifecycle, now represented by the badge.
+    let rest = detail
+        .split_once(' ')
+        .map_or("", |(_, rest)| rest)
+        .trim_start_matches('·')
+        .trim();
+    rest.to_uppercase()
+        .replace("(HEALTHY)", "✓")
+        .replace("(UNHEALTHY)", "×")
+        .replace("(PAUSED)", "")
+}
+
 /// An ordinary row: an optional pulsing health dot, then either aligned
 /// name/detail columns (a `▸` name marks the active account and renders
 /// bright) or a single run of text in the row's accent.
-fn entry_line(r: &CardRow, i: usize, name_w: usize, inner_w: usize, tick: u64) -> Line<'static> {
+fn entry_line(r: &CardRow, _i: usize, name_w: usize, inner_w: usize, tick: u64) -> Line<'static> {
+    if let Some(state) = r.container_state {
+        let (badge, color) = container_badge(state, r.health, tick);
+        let name_w = name_w.min(inner_w.saturating_sub(6));
+        let prefix = format!("  {:<name_w$}  ", truncate(&r.name, name_w));
+        let detail = container_detail(r);
+        return Line::from(vec![
+            Span::styled(prefix, Style::default().fg(SLATE_400)),
+            Span::styled(
+                truncate(badge, inner_w.saturating_sub(name_w + 4)),
+                Style::default().fg(color),
+            ),
+            Span::styled(
+                truncate(&format!("  {detail}"), inner_w.saturating_sub(name_w + 5)),
+                Style::default().fg(MUTED),
+            ),
+        ]);
+    }
     let mut spans = vec![Span::raw("  ")];
     let mut used = 2usize;
     if let Some(h) = r.health {
         let fg = match h {
-            Health::Bad => pulse(HEALTH_BAD, tick + i as u64 * 8),
-            Health::Warn => pulse(HEALTH_WARN, tick + i as u64 * 8),
-            Health::Good => pulse(HEALTH_GOOD, tick + i as u64 * 8),
+            Health::Bad => RED,
+            Health::Warn => AMBER,
+            Health::Good => MUTED,
             Health::Off => SLATE_600,
         };
         spans.push(Span::styled("● ", Style::default().fg(fg)));
@@ -422,7 +492,7 @@ fn entry_line(r: &CardRow, i: usize, name_w: usize, inner_w: usize, tick: u64) -
 /// A compact gauge with eighth-cell precision. Full blocks carry the accent,
 /// a partial block preserves small percentages, and shade cells show the
 /// unused portion without letting a meter dominate the whole row.
-fn gauge_parts(percent: u8, width: usize) -> (usize, Option<char>, usize) {
+pub(crate) fn gauge_parts(percent: u8, width: usize) -> (usize, Option<char>, usize) {
     if width == 0 {
         return (0, None, 0);
     }
@@ -448,10 +518,20 @@ fn gauge_parts(percent: u8, width: usize) -> (usize, Option<char>, usize) {
 }
 
 pub(crate) fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
+    if max == 0 {
+        String::new()
+    } else if Line::from(s).width() <= max {
         s.to_string()
     } else {
-        let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+        let mut out = String::new();
+        for ch in s.chars() {
+            let mut next = out.clone();
+            next.push(ch);
+            if Line::from(next.as_str()).width() > max - 1 {
+                break;
+            }
+            out = next;
+        }
         out.push('…');
         out
     }
@@ -556,7 +636,7 @@ mod tests {
             ..CardRow::default()
         }];
         let line = text(&card_row_lines(&rows, 1, 80, 7)[0]);
-        assert!(line.ends_with("resets Mon 19:00 (in 21d)"), "{line}");
+        assert!(line.ends_with("RESETS MON 19:00 (IN 21D)"), "{line}");
     }
 
     #[test]

@@ -2,8 +2,9 @@
 name = "insomnia"
 version = "0.1.0"
 edition = "2021"
+default-run = "insomnia"
 rust-version = "1.87"
-description = "Keep your Mac awake, beautifully. A caffeinate replacement with a night-sky TUI and a pluggable dashboard."
+description = "Keep your Mac awake with a night-sky TUI and a native menu bar dashboard."
 license = "MIT"
 repository = "https://github.com/cxkw-dev/insomnia"
 keywords = ["caffeinate", "macos", "tui", "sleep", "dashboard"]
@@ -13,6 +14,7 @@ categories = ["command-line-utilities"]
 ratatui = "0.29"
 crossterm = "0.28"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = "0.8"
 
 [profile.release]
