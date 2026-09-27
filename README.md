@@ -71,7 +71,7 @@ custom-card protocol below.
 Requires [Rust](https://rustup.rs) and a Mac.
 
 ```sh
-cargo install --path .
+cargo install --path terminal
 insomnia
 ```
 
@@ -317,7 +317,7 @@ the sky holds.
 ## Add your own flyer
 
 The sky is a registry, and it's built to be extended — the full guide lives
-in a doc comment at the top of [`src/sky.rs`](src/sky.rs). Two steps:
+in a doc comment at the top of [`terminal/src/sky.rs`](terminal/src/sky.rs). Two steps:
 
 1. **Write a draw function** in `sky.rs` that positions itself from
    `ctx.tick` and draws with `pixel::set_px` — one call per pixel, half-block
@@ -354,11 +354,11 @@ make preview   # one headless frame (cargo run --example preview <w> <h> <tick>)
 make install   # rebuild and replace the installed binary
 
 # inspect the actual terminal cells in color using fixture data
-cargo run --quiet --example preview 110 46 7 --html > preview.html
+cargo run --quiet --manifest-path terminal/Cargo.toml --example preview 110 46 7 --html > preview.html
 ```
 
 The `insomnia` on your PATH is the installed copy — code changes don't reach
-it until `make install` (or `cargo install --path .`) rebuilds it.
+it until `make install` (or `cargo install --path terminal`) rebuilds it.
 
 ## License
 

@@ -7,11 +7,11 @@ contents="$app/Contents"
 arch=$(uname -m)
 
 cd "$repo_root"
-cargo build --release --bin insomnia-snapshot
+cargo build --release --manifest-path "$repo_root/terminal/Cargo.toml" --bin insomnia-snapshot
 mkdir -p "$contents/MacOS" "$contents/Resources/Fonts" "$contents/Resources/Icons"
 swiftc -O -swift-version 6 -parse-as-library -target "${arch}-apple-macosx13.0" \
   "$repo_root/macos/Sources/InsomniaApp.swift" -o "$contents/MacOS/Insomnia"
-cp "$repo_root/target/release/insomnia-snapshot" "$contents/MacOS/insomnia-snapshot"
+cp "$repo_root/terminal/target/release/insomnia-snapshot" "$contents/MacOS/insomnia-snapshot"
 cp "$repo_root/macos/Fonts/Geist.ttf" "$contents/Resources/Fonts/Geist.ttf"
 cp "$repo_root/macos/Fonts/GeistMono.ttf" "$contents/Resources/Fonts/GeistMono.ttf"
 cp "$repo_root/macos/Fonts/OFL.txt" "$contents/Resources/Fonts/OFL.txt"

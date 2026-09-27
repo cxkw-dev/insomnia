@@ -21,8 +21,12 @@ make install   # rebuild and replace the installed binary
 make macos     # build dist/Insomnia.app with the bundled snapshot helper
 make install-app   # build, copy to /Applications (or ~/Applications), login item, relaunch
 make uninstall-app # remove the installed app and its login item
-cargo test durations   # a single test, by substring
+cd terminal && cargo test durations   # a single test, by substring
 ```
+
+The Rust crate lives in `terminal/`, so bare `cargo` commands need either
+`cd terminal` or `--manifest-path terminal/Cargo.toml`. The Makefile targets
+handle this from the repo root.
 
 **The install gotcha:** the `insomnia` on the user's PATH is the installed
 copy (`~/.cargo/bin/insomnia`), and the menu bar app the user runs is the copy
@@ -34,17 +38,22 @@ runs from it.
 
 **Seeing a change:** `make preview` renders one frame headlessly to stdout —
 use it to eyeball layout work without a live terminal. The README's hero
-frame is that exact output (`cargo run --example preview 110 46 7`); if a
+frame is that exact output (`make preview`); if a
 change alters the frame's look, regenerate the README block from it.
 
 ## Layout
 
-One repo, two deliverables that share `~/.config/insomnia/config.toml`:
+One repo, two apps that share `~/.config/insomnia/config.toml`:
 
-- `src/` — the Rust terminal app and the `insomnia-snapshot` helper binary.
+- `terminal/` — the Rust crate: `Cargo.toml`, `src/`, and `examples/`. Builds
+  the `insomnia` TUI and the `insomnia-snapshot` helper binary.
 - `macos/` — the Swift menu bar app plus `build.sh`, `install.sh`,
-  `uninstall.sh`, fonts, and icons. It bundles the snapshot helper.
+  `uninstall.sh`, fonts, and icons. It bundles the snapshot helper from
+  `terminal/target/release/`.
 - `dist/` — gitignored output of `make macos`.
+
+The root holds only the Makefile, README, LICENSE, and this file. Module
+paths below (`main.rs`, `ui.rs`, …) are relative to `terminal/src/`.
 
 ## Architecture
 
