@@ -10,59 +10,59 @@ timer and countdown, and a small dashboard you can teach new tricks.
 and it doesn't pretend to run anywhere else.
 
 ```text
-·                    ˚  ✦                                                                               ˚
-                 ·      ⋆                             ▀▄                                                ▄▀
-         ˚           · .      ✦                         ▀▄    ˚  ⋆              ·        ·     ✦      ▄▀
-       ✧                           ⋆                      ▀▄                                        ▄▀
-        .                            ✧  ✦    .☾  I N S O M N I A                             ˚    ▄▀     ˚
-       ✦      ▀▄✧    ˚        .                              ✦▀▄                                ▄▀ .
-             ╭ ● awake ─────────────────────────────────────────────────────────────────────────╮.      .˚
-             │                                                                                  │    ✧
-   ˚         │   NIGHT WATCH                                              ● display  ● system   │
-      .      │                                                                                  │.    │
-             │   00:42:17 awake                                            01:17:43 remaining   │    ─✦─
-             │   ━━━━━━━━━━━━━━━━━━━━━━━━━━◆───────────────────────────────────────────────  35%│    ✧│     ˚
-             │   ↯ ac power · 100%                                         auto release armed   │˚
- · ⋆         │                                                                                  │
-             │  ✦ ai usage                                                                      │
-             │  ─ ✻ claude ──────────────────────────────────────────────────────────────────── │      ·
-      ·      │  ● ▸ andy.nguyen      enterprise · $25.65 left · active                          │
-         ˚   │    ╰ monthly spend   ████████████▏░  87%  $174.35 / $200                         │          ·
-             │  ●   cxkw.dev         42% used                                                   │
-        ✦    │    ├ 5h window       █▎░░░░░░░░░░░░   9%  resets today 14:30                     │      .
-        ⋆    │    ├ weekly          █████▉░░░░░░░░  42%  resets Sun 03:49                       │
-             │    ╰ Fable weekly    ██████████████ 100%  resets Sat 11:59                       │
-             │                                                                                  │           .
-            ⋆│  ─ ◎ openai codex ────────────────────────────────────────────────────────────── │       ✧
-             │  ● ▸ cxkw.dev         pro · 96% used · active                                    │            ˚
-         .   │    ╰ weekly          █████████████▌  96%  resets Mon 09:00                       │           ˚
-      ˚      │  ●   andy.nguyen      business · 95% used · stale 1d                             │
-             │    ╰ monthly credits █████████████▎  95%  resets Fri 19:00                       │        ·
-             │                                                                                  │
-             │  ─ ⧉ copilot ─────────────────────────────────────────────────────────────────── │     ·
-  ⋆          │  ● ▸ andy-nguyen-cxkw biz · unlimited                                            │
-  ·          │                                                                                  │            .
-     .      ·│  ≋ docker                                                                        │
-✦  · ✦       │  ● worker             restarting                                                 │  .
- .   .       │  ● web                up 3 hours                                                 │ ˚˚
-             │  ● postgres           up 3 hours                                                 │
-             │  ● redis              up 3 hours                                                 │       ˚
-            ⋆│  ● builder            up 2 hours                                                 │      ·
-         ✧   │                                                                                  │      .     ˚
-             ╰──────────────────────────────────────────────────────────────────────────────────╯✧
-      ·   ·                           ✦                                                  ✦˚  ✦   ˚         ˚
-˚   ·         ˚                ˚˚           q release & let it sleep                       ⋆              .
-            .   . ·             ·              ✦             .
-                         ˚  ˚     ⋆             ·         ✦
-                            ˚           ·    ✦                   ✧ ·
-                ˚·       ·                ˚ ˚                 ✦                                ⋆  ✦
+·                              ✦
+                                              ☾  I N S O M N I A
+
+  ╭────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │                                                                                                        │
+  │   NIGHT WATCH                                                                                ● AWAKE   │
+  │                                                                                                        │
+  │   01:17:43 REMAINING                                                                00:42:17 ELAPSED   │
+  │   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◆────────────────────────────────────────────────────────────  35%   │
+  │                                                                                                        │
+  │   DISPLAY + SYSTEM HELD                                                       RELEASES AUTOMATICALLY   │
+  │   AC POWER · BATTERY 100%                                                                              │
+  │                                                                                                        │
+  │   ──────────────────────────────────────────────────────────────────────────────────────────────────   │
+  │                                                                                                        │
+  │   AI USAGE                                                                          4 NEED ATTENTION   │
+  │                                                                                                        │
+  │   CLAUDE                                                                                               │
+  │     WORK ACCOUNT        ENTERPRISE · $25 LEFT · ACTIVE                                                 │
+  │       ╰ MONTHLY SPEND   ████████████████████▉░░░  87%                                                  │
+  │                         $175 / $200                                                                    │
+  │     PERSONAL ACCOUNT    42% USED                                                                       │
+  │       ╰ 5H WINDOW       ██▏░░░░░░░░░░░░░░░░░░░░░   9%                                                  │
+  │                         RESET IN 2H · TODAY 2:30 PM                                                    │
+  │       ╰ WEEKLY          ██████████▏░░░░░░░░░░░░░  42%                                                  │
+  │                         RESET IN 3D · SUN 3:49 AM                                                      │
+  │       ╰ FABLE WEEKLY    ████████████████████████ 100%                                                  │
+  │                         RESET IN 2D · SAT 11:59 AM                                                     │
+  │                                                                                                        │
+  │   CODEX                                                                                                │
+  │   › PERSONAL ACCOUNT    PRO · 96% USED · ACTIVE                                                        │
+  │       ╰ WEEKLY          ███████████████████████░  96%                                                  │
+  │                         RESET IN 4D · MON 9:00 AM                                                      │
+  │     WORK ACCOUNT        BUSINESS · 95% USED · STALE 1D                                                 │
+  │       ╰ MONTHLY CREDITS ██████████████████████▊░  95%  STALE                                           │
+  │                         BILLING IN 1D · FRI 7:00 PM                                                    │
+  │                                                                                                        │
+  │   COPILOT                                                                                              │
+  │     EXAMPLE TEAM        BIZ · UNLIMITED                                                                │
+  │                                                                                                        │
+  │   1–25 OF 33 · PGUP/PGDN SCROLL                                                                        │
+  │                                                                                                        │
+  ╰────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+                           ↑↓ NAVIGATE   PGUP/PGDN SCROLL   M MOTION:ON   Q RELEASE
+                            .
 ```
 
 That's one frame, rendered headlessly in monochrome — the real thing is in
-color, and everything up there moves.
+color, with a sparse, slowly moving sky around a steady dashboard.
 
-The AI usage section in this preview demonstrates a local custom card; it is
-not bundled and insomnia does not read provider credentials itself. Docker is
+The AI usage section in this preview uses synthetic data from a custom card;
+the card is not bundled, and insomnia does not read provider credentials. Docker is
 the only built-in dashboard integration. Everything else uses the documented
 custom-card protocol below.
 
@@ -85,6 +85,40 @@ insomnia
 
 Quit with `q`, `esc`, or `ctrl-c` — the assertions release instantly and your
 Mac goes back to sleeping on its own schedule.
+
+### Menu bar app
+
+The native macOS app lives in [`macos/`](macos/). It keeps the CLI intact and
+reads the same `~/.config/insomnia/config.toml` cards through a bundled Rust
+helper. The popover groups AI accounts into **Business AI** and **Personal**,
+with `cxkw.dev` accounts under Personal. Each provider's mark and quota meters
+use its brand color, with reset details below. It refreshes every 30 seconds
+and has a manual refresh button.
+
+Build it with the macOS Command Line Tools and open the resulting app:
+
+```sh
+make macos
+open dist/Insomnia.app
+```
+
+Click the moon in the menu bar to see usage and use the switch beside the
+Insomnia wordmark to keep the display awake. The switch starts off when the
+app opens. While on, the app holds a macOS display sleep assertion; turning it
+off or quitting releases the assertion. The crescent turns amber and glows
+while awake. Closing the popover leaves the app running in the menu bar.
+The app does not install itself
+or start at login.
+
+The popover takes its high-contrast typography, black canvas, thin dividers,
+and restrained glow from [Vercel's homepage](https://vercel.com/home). It uses
+Geist type, thin quota meters, and compact provider marks.
+The marks and their sources are documented in [`macos/Icons/`](macos/Icons/).
+
+The app uses your existing card commands, including the local `ai usage` card
+if you have configured one. If no cards are configured, add a `[[card]]` block
+as described below. Credentials stay with the local commands; the app reads
+their rendered rows.
 
 ## Usage
 
@@ -114,18 +148,44 @@ Durations read the way you'd say them: a bare number is seconds (matching
 
 ## The dashboard
 
-Night Watch is always there. It shows which power assertions are active, how
-long insomnia has held them, and the current power source and battery level.
-Give insomnia a duration with `-t` and it adds the remaining time, a progress
-timeline, and an `auto release armed` state. Without a duration, the timeline
-runs indefinitely until you release it with `q`.
+The default layout is one quiet frame. `night watch` stays anchored above the
+dashboard, with remaining time first, elapsed time beside it, and power details
+underneath. Without a duration, it shows elapsed time and `until you release`.
+The wordmark, labels, and displayed card text use uppercase; commands and source
+data are unchanged.
 
-Around Night Watch, dashboard cards come and go as their sources do.
+Every provider has its own color, taken from the card's existing header and
+meter accents. Accounts, all quota windows, reset times, and container statuses
+are displayed immediately. Reset and billing details appear beneath each usage
+meter, with uppercase days and 12-hour AM/PM times. Percentages use amber and red for high usage;
+provider labels and gauges keep their identifying colors. Source-marked stale
+data keeps its bar and carries an explicit stale label. A 100% value fills
+the entire gauge. Account values, usage bars, reset details, and container
+indicators share one aligned column. Usage bars stay compact at up to 24 cells,
+with equal space reserved for percentages and stale status.
 
-**Docker is built in.** When the daemon is up, a `≋ docker` card lists every
-container with a pulsing health-colored dot, unhealthy ones sorted to the top.
-When docker isn't running, the card simply isn't there. To turn it off for
-good:
+Docker containers use subtle single-character indicators: a softly breathing
+muted green `●` for running, amber `Ⅱ` for paused, a dim `○` for stopped,
+a softly breathing amber `◌` for restarting, and a red `×` for errors. Uptime,
+health-check results, and exit details remain
+visible. The animation represents the last polled state, not CPU activity.
+
+| key | action |
+|-----|--------|
+| `↑` / `↓`, `k` / `j` | select a row |
+| `page up` / `page down` | scroll the dashboard |
+| `m` | toggle sky and container animation; data and timers keep updating |
+| `q`, `esc`, `ctrl-c` | release and quit |
+
+Selection follows the same source row across refreshes. Narrow terminals wrap
+quota details; short terminals scroll the dashboard while keeping the session
+above it. A truly tiny terminal uses compact mode.
+
+**Docker is built in.** Every container stays visible, including stopped ones.
+Rows show the state (running, stopped, paused, or restarting), uptime or exit
+details, and health-check results when available. Cleanly stopped containers
+are quiet; failures and unhealthy containers need attention. When the daemon
+is unavailable, the section is absent. To turn it off:
 
 ```toml
 [docker]
@@ -141,42 +201,35 @@ Each one runs a shell command on a timer and turns its stdout into rows:
 | `title` | yes | — | the card's name |
 | `command` | yes | — | run via `sh -c` every `interval` seconds |
 | `interval` | no | `10` | seconds between runs (minimum 2) |
-| `glyph` | no | `◆` | a single-width character beside the title |
-| `accent` | no | `violet` | `violet` `pink` `sky` `blue` `emerald` `gold` `red` `slate` `coral` `teal` |
-| `side` | no | `right` | `left` floats the card to the left of the status card when the terminal fits three columns |
+| `glyph` | no | `◆` | title glyph in the optional separate-card layout |
+| `accent` | no | `violet` | separate-card accent: `violet` `pink` `sky` `blue` `emerald` `gold` `red` `slate` `coral` `teal` |
+| `side` | no | `right` | `left` places separate cards left of the session when space permits |
 
-The row protocol: **each line of stdout is one row.** Plain text renders
-as-is. Lines shaped `ok|name|detail`, `warn|name|detail`, or `bad|name|detail`
-get a pulsing health dot and aligned columns — the detail is optional, and
-`off|name|detail` gives a steady slate dot for rows that are present but
-dormant. A line shaped `hdr|accent|text` becomes a section header tinted
-with that accent and a horizontal divider, preceded by a blank line so each
-group reads as its own block. This is useful for giving each AI provider or
-environment a distinct visual lane inside one card.
-`bar|accent|label|percent|detail` renders a colored utilization meter from
-0–100 as a compact, high-resolution gauge; consecutive meters are joined to
-the account above them by a small branch rail. The detail is optional and is
-useful for reset times. A card shows at most 32 rows, and only appears at all
-when its command succeeds and prints something, so a quiet source costs you
-nothing.
+The row protocol: **each line of stdout is one source row.** Plain text remains
+readable as uppercase text. `ok|name|detail`, `warn|name|detail`,
+`bad|name|detail`, and `off|name|detail` describe healthy, warning, failed, and
+dormant items. The detail is optional. `hdr|accent|text` starts a group, such
+as a provider or environment. `bar|accent|label|percent|detail` supplies a
+0–100 utilization meter; consecutive meters belong to the preceding health
+row. Its optional detail is useful for reset times.
+
+The focused layout shows every meter and detail immediately. Standalone meters
+and plain-text cards also work. Provider labels and gauges use their configured
+accents; amber and red values mark attention. A command contributes at most 32
+source rows and its card only appears when the command succeeds with output.
 
 Card commands are trusted local code and run through `sh -c`. Keep tokens and
 secrets out of the TOML file; prefer authenticated CLIs, Keychain-backed tools,
 or environment variables that are already available to the command.
 
-Layout takes care of itself: cards sail beside the status card on a wide
-terminal, dock beneath it on a narrow one, and any card that doesn't fit the
-height folds into a one-line summary inside the status card. A truly tiny
-terminal gets a single-line compact mode, starfield included.
-
-Prefer one box to many? A `[dashboard]` table with `combined = true` folds
-every card — custom and docker alike — into the status box itself, each as
-a section under a header in that card's glyph and accent, so the whole app
-is a single box that expands responsively on wider terminals:
+The focused layout is the default (`combined = true`). The previous separate
+cards remain available with `combined = false`: they sit beside the session
+on wide terminals, stack below it on narrow ones, and fold when space runs out.
+Row navigation and scrolling belong to the focused layout.
 
 ```toml
 [dashboard]
-combined = true
+combined = false # optional separate-card layout
 ```
 
 Some cards worth stealing:
@@ -233,9 +286,16 @@ No config file is needed at all — everything above is optional.
 
 ## The sky
 
-Beyond the always-on starfield and glint stars, two kinds of flyers keep
-their own schedules, each occasional enough that a pass always feels like a
-small event:
+Sparse stars and occasional flyers stay around the edges of the dashboard.
+Status indicators and the wordmark remain steady. Press `m` to freeze the sky,
+or start with motion off in your config:
+
+```toml
+[sky]
+motion = false
+```
+
+The individual flyer switches still apply when motion is on:
 
 | flyer | what it does |
 |-------|--------------|
@@ -290,6 +350,9 @@ make run       # the real thing, from the working tree
 make check     # fmt + clippy + tests
 make preview   # one headless frame (cargo run --example preview <w> <h> <tick>)
 make install   # rebuild and replace the installed binary
+
+# inspect the actual terminal cells in color using fixture data
+cargo run --quiet --example preview 110 46 7 --html > preview.html
 ```
 
 The `insomnia` on your PATH is the installed copy — code changes don't reach

@@ -46,7 +46,7 @@ fn main() {
     } else {
         match ui::run(&cfg, &kinds, &file_cfg) {
             Ok(elapsed) => println!(
-                "\x1b[38;2;167;139;250m☾ insomnia\x1b[0m released — awake for {}. sleep well.",
+                "\x1b[38;2;167;139;250m☾ INSOMNIA\x1b[0m RELEASED — AWAKE FOR {}. SLEEP WELL.",
                 ui::fmt_hms(elapsed)
             ),
             Err(e) => {
@@ -61,20 +61,20 @@ fn main() {
 fn quiet_hold(cfg: &Config, kinds: &[Kind]) {
     let names = kinds
         .iter()
-        .map(|k| k.label())
+        .map(|k| k.label().to_uppercase())
         .collect::<Vec<_>>()
         .join(" + ");
     let until = match cfg.timeout {
-        Some(d) => format!("for {}", config::human(d)),
-        None => "until you ctrl-c".into(),
+        Some(d) => format!("FOR {}", config::human(d).to_uppercase()),
+        None => "UNTIL YOU CTRL-C".into(),
     };
-    println!("\x1b[38;2;167;139;250m☾ insomnia\x1b[0m — keeping {names} awake {until}");
+    println!("\x1b[38;2;167;139;250m☾ INSOMNIA\x1b[0m — KEEPING {names} AWAKE {until}");
     match cfg.timeout {
         Some(d) => {
             std::thread::sleep(d);
             println!(
-                "\x1b[38;2;167;139;250m☾ insomnia\x1b[0m released after {}. sleep well.",
-                config::human(d)
+                "\x1b[38;2;167;139;250m☾ INSOMNIA\x1b[0m RELEASED AFTER {}. SLEEP WELL.",
+                config::human(d).to_uppercase()
             );
         }
         None => loop {

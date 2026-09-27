@@ -4,8 +4,8 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-insomnia is a macOS-only Rust TUI that keeps the Mac awake — a `caffeinate`
-replacement holding IOKit power assertions directly — wrapped in a night-sky
+insomnia is a macOS-only Rust TUI and native menu bar app that keep the Mac
+awake. Both hold IOKit power assertions directly. The TUI has a night-sky
 animation with a status card and a configurable dashboard. `lib.rs` has a
 `compile_error!` for non-macOS targets, so everything (including tests) must
 run on a Mac.
@@ -18,6 +18,7 @@ make check     # fmt --check + clippy -D warnings + tests — run before committ
 make test      # cargo test
 make preview   # one headless frame (cargo run --example preview <w> <h> <tick>)
 make install   # rebuild and replace the installed binary
+make macos     # build dist/Insomnia.app with the bundled snapshot helper
 cargo test durations   # a single test, by substring
 ```
 
@@ -45,14 +46,30 @@ One render thread, one thread per data source, one channel between them.
   `Update`s over mpsc; also the row protocol parser (`parse_row`).
 - `cards.rs` — turns collected data into render-ready `SideCard`s
   (`build_cards`) and draws them: health rows, section headers, meters.
+- `dashboard.rs` — provider colors, stable selection identities,
+  always-visible quota details, and wrapped text for the default combined layout.
+- `bin/insomnia-snapshot.rs` — JSON snapshot of the configured cards for the
+  menu bar app, using the same collector and row protocol as the TUI.
 - `ui.rs` — the event loop, layout (wide / stacked / three-column / merged /
   compact), and the status card.
 - `sky.rs` — starfield and glint ambience plus the `FLYERS` registry
   (comets, shooting stars).
 - `art.rs` — the title art. `pixel.rs` — half-block pixel primitive.
   `theme.rs` — the shared palette.
+- `macos/Sources/InsomniaApp.swift` — SwiftUI menu bar popover, account grouping,
+  provider marks, and a display sleep assertion. `macos/build.sh` bundles it
+  with the Rust helper, fonts, and icons; `dist/` is ignored.
 
 ## Invariants worth knowing
+
+- **The default is focused and uppercase.** Keep one frame with the session
+  anchored above a scrollable dashboard. `combined = false` retains separate
+  cards. Source commands and data are not rewritten; only displayed text is
+  uppercased. `m` toggles sky motion, and `[sky] motion = false` starts still.
+- **Selection follows source identity.** Attach consecutive meters to their
+  account and display every quota and reset time immediately. Provider labels
+  and gauges keep their source accents; there are no disclosure controls.
+  Source-marked stale values keep their gauge with an explicit stale label.
 
 - **Height budgets are counted in rows.** Card spacing must live in the row
   lists themselves (see `space_sections`) — a line conjured at render time is

@@ -4,15 +4,19 @@
 use ratatui::style::Color;
 
 pub const TEXT: Color = Color::Rgb(226, 232, 240);
+pub const BACKGROUND: Color = Color::Rgb(17, 18, 29);
+pub const MUTED: Color = Color::Rgb(160, 167, 186);
+pub const BORDER: Color = Color::Rgb(52, 54, 77);
+pub const SELECTION: Color = Color::Rgb(32, 32, 49);
 pub const SLATE_400: Color = Color::Rgb(148, 163, 184);
 pub const SLATE_500: Color = Color::Rgb(100, 116, 139);
 pub const SLATE_600: Color = Color::Rgb(71, 85, 105);
 pub const SLATE_700: Color = Color::Rgb(51, 65, 85);
-pub const VIOLET_LIGHT: Color = Color::Rgb(167, 139, 250);
+pub const VIOLET_LIGHT: Color = Color::Rgb(185, 166, 245);
 pub const GOLD: Color = Color::Rgb(251, 191, 36);
-pub const EMERALD: Color = Color::Rgb(52, 211, 153);
-pub const AMBER: Color = Color::Rgb(251, 191, 36);
-pub const RED: Color = Color::Rgb(248, 113, 113);
+pub const EMERALD: Color = Color::Rgb(145, 203, 181);
+pub const AMBER: Color = Color::Rgb(241, 196, 119);
+pub const RED: Color = Color::Rgb(243, 155, 155);
 
 /// Dot colors for the three row-health states, shared by every card.
 pub const HEALTH_GOOD: (u8, u8, u8) = (52, 211, 153);
