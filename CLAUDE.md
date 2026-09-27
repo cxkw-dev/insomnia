@@ -19,18 +19,32 @@ make test      # cargo test
 make preview   # one headless frame (cargo run --example preview <w> <h> <tick>)
 make install   # rebuild and replace the installed binary
 make macos     # build dist/Insomnia.app with the bundled snapshot helper
+make install-app   # build, copy to /Applications (or ~/Applications), login item, relaunch
+make uninstall-app # remove the installed app and its login item
 cargo test durations   # a single test, by substring
 ```
 
 **The install gotcha:** the `insomnia` on the user's PATH is the installed
-copy (`~/.cargo/bin/insomnia`). Code changes do nothing to it until
-`make install`. When the user says a change "isn't showing up", this is
-almost always why.
+copy (`~/.cargo/bin/insomnia`), and the menu bar app the user runs is the copy
+in `/Applications/Insomnia.app` (or `~/Applications` when the system folder is
+not writable). Code changes do nothing to either until
+`make install` / `make install-app`. When the user says a change "isn't
+showing up", this is almost always why. `dist/` is only build output; nothing
+runs from it.
 
 **Seeing a change:** `make preview` renders one frame headlessly to stdout —
 use it to eyeball layout work without a live terminal. The README's hero
 frame is that exact output (`cargo run --example preview 110 46 7`); if a
 change alters the frame's look, regenerate the README block from it.
+
+## Layout
+
+One repo, two deliverables that share `~/.config/insomnia/config.toml`:
+
+- `src/` — the Rust terminal app and the `insomnia-snapshot` helper binary.
+- `macos/` — the Swift menu bar app plus `build.sh`, `install.sh`,
+  `uninstall.sh`, fonts, and icons. It bundles the snapshot helper.
+- `dist/` — gitignored output of `make macos`.
 
 ## Architecture
 

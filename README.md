@@ -95,11 +95,12 @@ with `cxkw.dev` accounts under Personal. Each provider's mark and quota meters
 use its brand color, with reset details below. It refreshes every 30 seconds
 and has a manual refresh button.
 
-Build it with the macOS Command Line Tools and open the resulting app:
+Install it with the macOS Command Line Tools present:
 
 ```sh
-make macos
-open dist/Insomnia.app
+make install-app     # builds, copies to /Applications (or ~/Applications), starts at login
+make uninstall-app   # removes the app and its login item
+make macos           # just build dist/Insomnia.app without installing
 ```
 
 Click the moon in the menu bar to see usage and use the switch beside the
@@ -107,8 +108,9 @@ Insomnia wordmark to keep the display awake. The switch starts off when the
 app opens. While on, the app holds a macOS display sleep assertion; turning it
 off or quitting releases the assertion. The crescent turns amber and glows
 while awake. Closing the popover leaves the app running in the menu bar.
-The app does not install itself
-or start at login.
+
+Like the CLI, the installed app is a copy: code changes do nothing until you
+run `make install-app` again.
 
 The popover takes its high-contrast typography, black canvas, thin dividers,
 and restrained glow from [Vercel's homepage](https://vercel.com/home). It uses
