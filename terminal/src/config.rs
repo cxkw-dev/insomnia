@@ -1,6 +1,6 @@
-//! Configuration: command-line flags, human durations, and the optional
-//! config file (`~/.config/insomnia/config.toml`) that drives the dashboard
-//! cards and sky toggles.
+//! Configuration: command-line flags and the optional config file
+//! (`~/.config/insomnia/config.toml`) that drives the dashboard cards, the
+//! sky, and the menu bar's account grouping.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -8,83 +8,65 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::duration;
 use crate::power::Kind;
 use crate::sky;
+use crate::theme::{accent_names, accent_rgb, ansi, Rgb, ANSI_RESET};
 
 // --- Command-line flags ---
 
 #[derive(Debug, Default)]
-pub struct Config {
-    pub display: bool,
-    pub idle: bool,
-    pub system: bool,
-    pub disk: bool,
+pub struct Flags {
+    /// What to hold awake; never empty after [`parse`].
+    pub kinds: Vec<Kind>,
     pub timeout: Option<Duration>,
     pub quiet: bool,
     pub config_path: Option<String>,
 }
 
-impl Config {
-    pub fn kinds(&self) -> Vec<Kind> {
-        let mut v = Vec::new();
-        if self.display {
-            v.push(Kind::Display);
-        }
-        if self.idle {
-            v.push(Kind::Idle);
-        }
-        if self.system {
-            v.push(Kind::System);
-        }
-        if self.disk {
-            v.push(Kind::Disk);
-        }
-        v
-    }
-}
-
 pub enum Outcome {
-    Run(Config),
+    Run(Flags),
     Help,
     Version,
 }
 
+const NEEDS_DURATION: &str = "-t needs a duration, e.g. -t 45m, -t 2h, -t 300";
+
 pub fn parse<I: Iterator<Item = String>>(mut args: I) -> Result<Outcome, String> {
-    let mut cfg = Config::default();
+    fn hold(kind: Kind, kinds: &mut Vec<Kind>) {
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    }
+    let mut flags = Flags::default();
     while let Some(arg) = args.next() {
+        if let Some(path) = config_arg(&arg, &mut args) {
+            flags.config_path = Some(path?);
+            continue;
+        }
         match arg.as_str() {
             "-h" | "--help" => return Ok(Outcome::Help),
             "-V" | "--version" => return Ok(Outcome::Version),
-            "--quiet" => cfg.quiet = true,
-            "--config" => {
-                let v = args
-                    .next()
-                    .ok_or("--config needs a path, e.g. --config ./insomnia.toml")?;
-                cfg.config_path = Some(v);
-            }
+            "--quiet" => flags.quiet = true,
             "-t" | "--for" => {
-                let v = args
-                    .next()
-                    .ok_or("-t needs a duration, e.g. -t 45m, -t 2h, -t 300")?;
-                cfg.timeout = Some(parse_duration(&v)?);
+                let v = args.next().ok_or(NEEDS_DURATION)?;
+                flags.timeout = Some(duration::parse(&v)?);
             }
             s if s.starts_with('-') && s.len() > 1 && !s.starts_with("--") => {
                 let chars: Vec<char> = s[1..].chars().collect();
                 for (i, c) in chars.iter().enumerate() {
                     match c {
-                        'd' => cfg.display = true,
-                        'i' => cfg.idle = true,
-                        's' => cfg.system = true,
-                        'm' => cfg.disk = true,
-                        'q' => cfg.quiet = true,
+                        'd' => hold(Kind::Display, &mut flags.kinds),
+                        'i' => hold(Kind::Idle, &mut flags.kinds),
+                        's' => hold(Kind::System, &mut flags.kinds),
+                        'm' => hold(Kind::Disk, &mut flags.kinds),
+                        'q' => flags.quiet = true,
                         't' => {
                             if i != chars.len() - 1 {
                                 return Err("-t must come last in a flag group".into());
                             }
-                            let v = args
-                                .next()
-                                .ok_or("-t needs a duration, e.g. -t 45m, -t 2h, -t 300")?;
-                            cfg.timeout = Some(parse_duration(&v)?);
+                            let v = args.next().ok_or(NEEDS_DURATION)?;
+                            flags.timeout = Some(duration::parse(&v)?);
                         }
                         _ => return Err(format!("unknown flag -{c} (see insomnia --help)")),
                     }
@@ -93,68 +75,43 @@ pub fn parse<I: Iterator<Item = String>>(mut args: I) -> Result<Outcome, String>
             s => return Err(format!("unexpected argument '{s}' (see insomnia --help)")),
         }
     }
-    if !(cfg.display || cfg.idle || cfg.system || cfg.disk) {
-        cfg.display = true;
-        cfg.idle = true;
+    if flags.kinds.is_empty() {
+        flags.kinds = vec![Kind::Display, Kind::Idle];
     }
-    Ok(Outcome::Run(cfg))
+    flags.kinds.sort_by_key(|k| *k as u8);
+    Ok(Outcome::Run(flags))
+}
+
+/// `--config <path>` or `--config=<path>`, shared by `insomnia` and
+/// `insomnia-snapshot`. `None` when `arg` isn't the config flag at all.
+pub fn config_arg(
+    arg: &str,
+    rest: &mut impl Iterator<Item = String>,
+) -> Option<Result<String, String>> {
+    if let Some(path) = arg.strip_prefix("--config=") {
+        return Some(Ok(path.to_string()));
+    }
+    (arg == "--config").then(|| {
+        rest.next()
+            .ok_or_else(|| "--config needs a path, e.g. --config ./insomnia.toml".into())
+    })
 }
 
 // --- The config file ---
 
-/// The optional TOML config: docker toggle, sky toggles, and custom cards.
-/// Everything defaults to a sensible value, so no file is required at all.
+/// The optional TOML config: `[docker]`, `[sky]`, `[dashboard]`,
+/// `[accounts]`, and `[[card]]` blocks. Everything defaults to a sensible
+/// value, so no file is required at all.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FileConfig {
     pub docker: DockerConfig,
-    /// `[sky]` — per-flyer toggles, e.g. `comets = false`. Unlisted = on.
-    pub sky: HashMap<String, bool>,
+    pub sky: SkyConfig,
     /// `[[card]]` blocks — custom dashboard cards fed by shell commands.
     #[serde(rename = "card")]
     pub cards: Vec<CardConfig>,
     pub dashboard: DashboardConfig,
     pub accounts: AccountsConfig,
-}
-
-/// The `[accounts]` table: how the menu bar app groups AI accounts. Each
-/// entry is a case-insensitive substring of an account row's name, so
-/// `personal = ["me@example.com"]` claims that login wherever it appears.
-/// Explicit entries win; unlisted accounts fall back to the plan in their
-/// detail (org, business, enterprise, team → business; anything else →
-/// personal). The terminal UI ignores this table.
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct AccountsConfig {
-    pub personal: Vec<String>,
-    pub business: Vec<String>,
-}
-
-/// The `[dashboard]` table. `combined = true` folds every card — custom and
-/// docker alike — into the status box itself, each as a section under a
-/// header in that card's glyph and accent, so the whole app is one box.
-/// The box expands responsively up to the renderer's comfortable reading
-/// width. Title, glyph, accent, and side are then unused.
-#[derive(Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct DashboardConfig {
-    pub combined: bool,
-    pub title: Option<String>,
-    pub glyph: Option<String>,
-    pub accent: Option<String>,
-    pub side: Option<String>,
-}
-
-impl Default for DashboardConfig {
-    fn default() -> Self {
-        Self {
-            combined: true,
-            title: None,
-            glyph: None,
-            accent: None,
-            side: None,
-        }
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,51 +126,106 @@ impl Default for DockerConfig {
     }
 }
 
-/// One custom dashboard card. `command` runs through `sh -c` on `interval`
-/// seconds; each stdout line becomes a row. Lines may be plain text,
-/// `ok|name|detail` / `warn|…` / `bad|…` / `off|…` for a health-dotted
-/// two-column row, or `hdr|accent|text` for a section header in that
-/// accent's color.
+/// `[sky]`: `motion = false` starts with a still sky; every other key is a
+/// flyer toggle from [`sky::FLYERS`] (unlisted flyers stay on).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(from = "HashMap<String, bool>")]
+pub struct SkyConfig {
+    pub motion: bool,
+    pub flyers: HashMap<String, bool>,
+}
+
+impl Default for SkyConfig {
+    fn default() -> Self {
+        HashMap::new().into()
+    }
+}
+
+impl From<HashMap<String, bool>> for SkyConfig {
+    fn from(mut flyers: HashMap<String, bool>) -> Self {
+        let motion = flyers.remove("motion").unwrap_or(true);
+        Self { motion, flyers }
+    }
+}
+
+/// `[dashboard]`. `combined = true` (the default) shows every card as a
+/// section of one scrollable frame under the session; `false` keeps the
+/// separate boxes, which then honor each card's glyph, accent, and side.
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DashboardConfig {
+    pub combined: bool,
+}
+
+impl Default for DashboardConfig {
+    fn default() -> Self {
+        Self { combined: true }
+    }
+}
+
+/// `[accounts]`: how the menu bar app groups AI accounts. Each entry is a
+/// case-insensitive substring of an account row's name, so
+/// `personal = ["me@example.com"]` claims that login wherever it appears.
+/// Explicit entries win; unlisted accounts fall back to the plan in their
+/// detail (org, business, enterprise, team → business; anything else →
+/// personal). The terminal UI ignores this table.
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AccountsConfig {
+    pub personal: Vec<String>,
+    pub business: Vec<String>,
+}
+
+/// One custom dashboard card. `command` runs through `sh -c` every
+/// `interval` seconds; each stdout line becomes a row in the row protocol
+/// (see [`crate::collect::parse_row`]).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CardConfig {
     pub title: String,
     pub command: String,
-    #[serde(default)]
-    pub glyph: Option<String>,
     #[serde(default = "default_interval")]
     pub interval: u64,
+    /// Separate-card layout only: the title glyph.
     #[serde(default)]
-    pub accent: Option<String>,
-    /// `"left"` floats the card to the left of the status card when the
-    /// terminal is wide enough for three columns; the default is `"right"`.
+    pub glyph: Option<String>,
+    /// Separate-card layout only: the box's accent.
     #[serde(default)]
-    pub side: Option<String>,
+    pub accent: Option<Accent>,
+    /// Separate-card layout only: `left` floats the card left of the status
+    /// card when the terminal fits three columns.
+    #[serde(default)]
+    pub side: Side,
 }
 
 fn default_interval() -> u64 {
     10
 }
 
-/// Accent names accepted by `accent = "…"` on a card.
-pub const ACCENTS: &[(&str, (u8, u8, u8))] = &[
-    ("violet", (167, 139, 250)),
-    ("pink", (244, 114, 182)),
-    ("sky", (125, 211, 252)),
-    ("blue", (59, 130, 246)),
-    ("emerald", (52, 211, 153)),
-    ("gold", (251, 191, 36)),
-    ("red", (248, 113, 113)),
-    ("slate", (148, 163, 184)),
-    ("coral", (217, 119, 87)),
-    ("teal", (16, 163, 127)),
-];
+const MIN_INTERVAL: u64 = 2;
 
-pub fn accent_rgb(name: &str) -> Option<(u8, u8, u8)> {
-    ACCENTS
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, rgb)| *rgb)
+/// A named accent from [`crate::theme::ACCENTS`]; anything else is a config
+/// error that lists the valid names.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct Accent(pub Rgb);
+
+impl TryFrom<String> for Accent {
+    type Error = String;
+
+    fn try_from(name: String) -> Result<Self, String> {
+        accent_rgb(&name)
+            .map(Accent)
+            .ok_or_else(|| format!("unknown accent '{name}' (try one of {})", accent_names()))
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    Left,
+    #[default]
+    Right,
 }
 
 /// Load the config file. An explicit `--config` path must exist; the default
@@ -242,37 +254,11 @@ fn parse_file(text: &str) -> Result<FileConfig, String> {
         if card.command.trim().is_empty() {
             return Err(format!("card '{}' is missing its command", card.title));
         }
-        if let Some(a) = &card.accent {
-            if accent_rgb(a).is_none() {
-                let known: Vec<&str> = ACCENTS.iter().map(|(n, _)| *n).collect();
-                return Err(format!(
-                    "card '{}': unknown accent '{a}' (try one of {})",
-                    card.title,
-                    known.join(", ")
-                ));
-            }
-        }
-        if let Some(sd) = &card.side {
-            if sd != "left" && sd != "right" {
-                return Err(format!(
-                    "card '{}': unknown side '{sd}' (left or right)",
-                    card.title
-                ));
-            }
-        }
-    }
-    if let Some(a) = &cfg.dashboard.accent {
-        if accent_rgb(a).is_none() {
-            let known: Vec<&str> = ACCENTS.iter().map(|(n, _)| *n).collect();
+        if card.interval < MIN_INTERVAL {
             return Err(format!(
-                "[dashboard]: unknown accent '{a}' (try one of {})",
-                known.join(", ")
+                "card '{}': interval must be at least {MIN_INTERVAL} seconds",
+                card.title
             ));
-        }
-    }
-    if let Some(sd) = &cfg.dashboard.side {
-        if sd != "left" && sd != "right" {
-            return Err(format!("[dashboard]: unknown side '{sd}' (left or right)"));
         }
     }
     for name in cfg.accounts.personal.iter().chain(&cfg.accounts.business) {
@@ -280,11 +266,11 @@ fn parse_file(text: &str) -> Result<FileConfig, String> {
             return Err("[accounts]: entries must not be empty".into());
         }
     }
-    for key in cfg.sky.keys() {
-        if key != "motion" && !sky::names().any(|n| n == key) {
+    for key in cfg.sky.flyers.keys() {
+        if !sky::names().any(|n| n == key) {
             let known: Vec<&str> = sky::names().collect();
             return Err(format!(
-                "[sky]: unknown flyer '{key}' (the sky holds {})",
+                "[sky]: unknown flyer '{key}' (the sky holds {}, plus motion)",
                 known.join(", ")
             ));
         }
@@ -293,7 +279,7 @@ fn parse_file(text: &str) -> Result<FileConfig, String> {
 }
 
 /// `$XDG_CONFIG_HOME/insomnia/config.toml`, or `~/.config/insomnia/config.toml`.
-pub fn default_config_path() -> PathBuf {
+fn default_config_path() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
@@ -301,88 +287,13 @@ pub fn default_config_path() -> PathBuf {
     base.join("insomnia").join("config.toml")
 }
 
-// --- Durations ---
-
-/// Ten years, in seconds. Longer than any vigil — and comfortably inside the
-/// range where `Instant + Duration` stays safe.
-const MAX_SECS: u64 = 10 * 365 * 24 * 3600;
-
-pub fn parse_duration(s: &str) -> Result<Duration, String> {
-    let s = s.trim().to_lowercase();
-    if s.is_empty() {
-        return Err("empty duration".into());
-    }
-    // Bare number = seconds, matching caffeinate -t.
-    if s.chars().all(|c| c.is_ascii_digit()) {
-        let secs: u64 = s.parse().map_err(|_| format!("bad duration '{s}'"))?;
-        return finish(secs);
-    }
-    let mut total: u64 = 0;
-    let mut num = String::new();
-    for c in s.chars() {
-        if c.is_ascii_digit() {
-            num.push(c);
-        } else {
-            let n: u64 = num
-                .parse()
-                .map_err(|_| format!("bad duration '{s}' (try 90s, 45m, 2h, 1h30m)"))?;
-            num.clear();
-            let mult = match c {
-                'h' => 3600,
-                'm' => 60,
-                's' => 1,
-                _ => return Err(format!("unknown unit '{c}' in '{s}' (use h, m, or s)")),
-            };
-            total = n
-                .checked_mul(mult)
-                .and_then(|v| total.checked_add(v))
-                .ok_or("duration too long — insomnia tops out at ten years")?;
-        }
-    }
-    if !num.is_empty() {
-        return Err(format!(
-            "trailing number without unit in '{s}' (use h, m, or s)"
-        ));
-    }
-    finish(total)
-}
-
-fn finish(secs: u64) -> Result<Duration, String> {
-    if secs == 0 {
-        return Err("duration must be greater than zero".into());
-    }
-    if secs > MAX_SECS {
-        return Err("duration too long — insomnia tops out at ten years".into());
-    }
-    Ok(Duration::from_secs(secs))
-}
-
-pub fn human(d: Duration) -> String {
-    let s = d.as_secs();
-    let (h, m, sec) = (s / 3600, (s % 3600) / 60, s % 60);
-    let mut parts = Vec::new();
-    if h > 0 {
-        parts.push(format!("{h}h"));
-    }
-    if m > 0 {
-        parts.push(format!("{m}m"));
-    }
-    if sec > 0 && h == 0 {
-        parts.push(format!("{sec}s"));
-    }
-    if parts.is_empty() {
-        parts.push("0s".into());
-    }
-    parts.join(" ")
-}
-
 pub fn help() -> String {
-    let violet = "\x1b[38;2;167;139;250m";
-    let pink = "\x1b[38;2;244;114;182m";
-    let slate = "\x1b[38;2;148;163;184m";
-    let dim = "\x1b[38;2;100;116;139m";
+    let violet = ansi((167, 139, 250));
+    let pink = ansi((244, 114, 182));
+    let slate = ansi((148, 163, 184));
+    let dim = ansi((100, 116, 139));
     let bold = "\x1b[1m";
-    let r = "\x1b[0m";
+    let r = ANSI_RESET;
     format!(
         "\
 {violet}☾ insomnia{r} {dim}v{}{r} — keep your mac awake, beautifully
@@ -413,19 +324,30 @@ and toggles the sky's comets and shooting stars — see the readme.{r}
 mod tests {
     use super::*;
 
+    fn flags(args: &[&str]) -> Flags {
+        match parse(args.iter().map(|s| s.to_string())).unwrap() {
+            Outcome::Run(f) => f,
+            _ => panic!("expected a run"),
+        }
+    }
+
     #[test]
-    fn durations() {
-        assert_eq!(parse_duration("300").unwrap(), Duration::from_secs(300));
-        assert_eq!(parse_duration("90s").unwrap(), Duration::from_secs(90));
-        assert_eq!(parse_duration("45m").unwrap(), Duration::from_secs(2700));
-        assert_eq!(parse_duration("1h30m").unwrap(), Duration::from_secs(5400));
-        assert!(parse_duration("0").is_err());
-        assert!(parse_duration("5x").is_err());
-        assert!(parse_duration("90").is_ok());
-        // Absurd values error instead of overflowing.
-        assert!(parse_duration("18446744073709551615").is_err());
-        assert!(parse_duration("10000000000000000h").is_err());
-        assert!(parse_duration("87600h").is_ok()); // exactly ten years
+    fn flags_combine_and_default() {
+        assert_eq!(flags(&[]).kinds, [Kind::Display, Kind::Idle]);
+        let f = flags(&["-di", "-t", "90m"]);
+        assert_eq!(f.kinds, [Kind::Display, Kind::Idle]);
+        assert_eq!(f.timeout, Some(Duration::from_secs(5400)));
+        assert_eq!(flags(&["-mdt", "5"]).kinds, [Kind::Display, Kind::Disk]);
+        assert_eq!(
+            flags(&["--config=x.toml"]).config_path.as_deref(),
+            Some("x.toml")
+        );
+        assert_eq!(
+            flags(&["--config", "y.toml"]).config_path.as_deref(),
+            Some("y.toml")
+        );
+        assert!(parse(["-td".to_string()].into_iter()).is_err());
+        assert!(parse(["--config".to_string()].into_iter()).is_err());
     }
 
     #[test]
@@ -433,7 +355,8 @@ mod tests {
         let cfg = parse_file("").unwrap();
         assert!(cfg.docker.enabled);
         assert!(cfg.cards.is_empty());
-        assert!(cfg.sky.is_empty());
+        assert!(cfg.sky.motion);
+        assert!(cfg.sky.flyers.is_empty());
         assert!(cfg.dashboard.combined);
         assert!(cfg.accounts.personal.is_empty());
     }
@@ -472,22 +395,26 @@ title = "todos"
 command = "echo 'ok|hello|world'"
 glyph = "⌖"
 accent = "violet"
+side = "left"
 interval = 30
 "#,
         )
         .unwrap();
         assert!(!cfg.docker.enabled);
-        assert_eq!(cfg.sky.get("comets"), Some(&false));
+        assert_eq!(cfg.sky.flyers.get("comets"), Some(&false));
         assert_eq!(cfg.cards.len(), 1);
         assert_eq!(cfg.cards[0].interval, 30);
+        assert_eq!(cfg.cards[0].accent, Some(Accent((167, 139, 250))));
+        assert_eq!(cfg.cards[0].side, Side::Left);
     }
 
     #[test]
-    fn motion_can_be_disabled_without_changing_flyer_configuration() {
+    fn motion_is_separate_from_flyer_toggles() {
         let cfg = parse_file("[sky]\nmotion = false\ncomets = true\n[dashboard]\ncombined = false")
             .unwrap();
-        assert_eq!(cfg.sky.get("motion"), Some(&false));
-        assert!(sky::resolve(&cfg.sky)[0]);
+        assert!(!cfg.sky.motion);
+        assert!(!cfg.sky.flyers.contains_key("motion"));
+        assert!(sky::resolve(&cfg.sky.flyers)[0]);
         assert!(!cfg.dashboard.combined);
     }
 
@@ -495,9 +422,15 @@ interval = 30
     fn bad_configs_error_helpfully() {
         assert!(parse_file("[sky]\ndragon = true").is_err());
         assert!(parse_file("[[card]]\ntitle = \"x\"\ncommand = \"\"").is_err());
+        assert!(parse_file("[[card]]\ntitle = \"x\"\ncommand = \"echo\"\ninterval = 1").is_err());
+        let err = parse_file("[[card]]\ntitle = \"x\"\ncommand = \"echo\"\naccent = \"mauve\"")
+            .unwrap_err();
         assert!(
-            parse_file("[[card]]\ntitle = \"x\"\ncommand = \"echo\"\naccent = \"mauve\"").is_err()
+            err.contains("unknown accent 'mauve'") && err.contains("violet"),
+            "{err}"
         );
+        assert!(parse_file("[[card]]\ntitle = \"x\"\ncommand = \"echo\"\nside = \"up\"").is_err());
+        assert!(parse_file("[dashboard]\nside = \"left\"").is_err());
         assert!(parse_file("nonsense = 1").is_err());
     }
 }

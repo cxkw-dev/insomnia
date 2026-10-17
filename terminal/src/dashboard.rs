@@ -1,5 +1,7 @@
-//! A focused presentation of the existing card protocol. Account meters stay
-//! attached to their source row; all details stay visible, and selection follows source identity.
+//! The combined dashboard: every card as a section of one scrollable frame.
+//! Meters stay attached to the account row above them, every detail is
+//! visible without interaction, and selection follows a row's identity
+//! (card, header, name) across refreshes.
 
 use std::collections::HashSet;
 
@@ -8,47 +10,53 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::cards::{self, SideCard};
-use crate::collect::{CardRow, Health};
-use crate::theme::{AMBER, MUTED, RED, SELECTION, TEXT, VIOLET_LIGHT};
+use crate::cards::{self, SideCard, GAUGE_COLUMN, GAUGE_MAX_W, METER_LABEL_W, PERCENT_W};
+use crate::collect::{severity, CardRow};
+use crate::text::{pad, pair, truncate, width, wrap};
+use crate::theme::{rgb, AMBER, MUTED, SELECTION, TEXT, VIOLET_LIGHT};
 
-// One shared value column for accounts, meters, reset details, and containers.
-const VALUE_COLUMN: usize = 22;
+/// One shared value column for accounts, meters, reset details, and
+/// containers — the column where the separate-card meters put their gauge.
+const VALUE_COLUMN: usize = GAUGE_COLUMN;
 const ACCOUNT_WIDTH: usize = VALUE_COLUMN - 4;
-const METER_LABEL_WIDTH: usize = VALUE_COLUMN - 7;
+/// Room every meter keeps after its gauge: the value, a gap, and "STALE".
+const METER_TAIL_W: usize = PERCENT_W + 2 + "STALE".len();
+/// Below this width meters collapse to one wrapped line of text.
+const WIDE_METER_MIN_W: usize = 55;
+/// Below this width an account's name and detail wrap onto their own lines.
+const ACCOUNT_ROW_MIN_W: usize = 28;
 
 fn gauge_width(width: usize) -> usize {
-    // Keep percentage and stale status space reserved for every meter.
-    width.saturating_sub(VALUE_COLUMN + 12).min(24)
+    width
+        .saturating_sub(VALUE_COLUMN + METER_TAIL_W)
+        .min(GAUGE_MAX_W)
 }
 
+/// What selection holds on to: stable across refreshes and reordering.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EntryKey {
-    section: String,
-    provider: String,
+    card: String,
+    header: String,
     name: String,
     occurrence: usize,
 }
 
+/// One selectable row and the meters attached to it.
 pub struct Entry {
     pub key: EntryKey,
-    provider: String,
+    header: String,
     accent: Color,
     row: CardRow,
-    details: Vec<CardRow>,
+    meters: Vec<CardRow>,
 }
 
 impl Entry {
-    fn peak(&self) -> Option<&CardRow> {
-        self.details
-            .iter()
-            .filter(|r| r.percent.is_some())
-            .max_by_key(|r| r.percent)
+    fn peak(&self) -> Option<u8> {
+        self.meters.iter().filter_map(|r| r.percent).max()
     }
 
     fn attention(&self) -> bool {
-        matches!(self.row.health, Some(Health::Bad | Health::Warn))
-            || self.peak().is_some_and(|r| r.percent >= Some(75))
+        severity(self.peak(), self.row.health).is_some()
     }
 
     fn stale(&self) -> bool {
@@ -61,75 +69,61 @@ impl Entry {
     }
 }
 
-struct Section {
+/// One card's block in the dashboard.
+struct CardSection {
     title: String,
+    stale: bool,
     entries: Vec<Entry>,
 }
 
 pub struct Dashboard {
-    sections: Vec<Section>,
+    sections: Vec<CardSection>,
 }
 
 impl Dashboard {
-    pub fn from_cards(cards: &[SideCard], merged: bool) -> Self {
-        let mut sections: Vec<Section> = Vec::new();
+    pub fn from_cards(cards: &[SideCard]) -> Self {
+        let mut sections: Vec<CardSection> = Vec::new();
         for card in cards {
-            let mut section = Section {
+            let card_key = format!(
+                "{}:{}",
+                card.title,
+                sections.iter().filter(|s| s.title == card.title).count()
+            );
+            let mut section = CardSection {
                 title: card.title.clone(),
+                stale: card.stale,
                 entries: Vec::new(),
             };
-            let mut provider = String::new();
-            let mut accent = Color::Rgb(card.accent.0, card.accent.1, card.accent.2);
+            let mut header = String::new();
+            let mut accent = rgb(card.accent);
             let mut attach_meter = false;
             for row in &card.rows {
-                if merged
-                    && row.accent.is_some()
-                    && !row.section
-                    && row.health.is_none()
-                    && row.percent.is_none()
-                    && !row.name.trim().is_empty()
-                {
-                    if !section.entries.is_empty() {
-                        sections.push(section);
-                    }
-                    section = Section {
-                        title: clean_label(&row.name),
-                        entries: Vec::new(),
-                    };
-                    provider.clear();
-                    accent = rgb(row.accent);
-                    attach_meter = false;
-                } else if row.section {
-                    provider = clean_label(&row.name);
-                    accent = rgb(row.accent);
+                if row.header {
+                    header = clean_label(&row.name);
+                    accent = row.accent.map_or(VIOLET_LIGHT, rgb);
                     attach_meter = false;
                 } else if row.percent.is_some() && attach_meter {
                     if let Some(entry) = section.entries.last_mut() {
-                        entry.details.push(row.clone());
+                        entry.meters.push(row.clone());
                     }
                 } else if !row.name.trim().is_empty() || row.detail.is_some() {
+                    let name = identity_name(&row.name);
                     let occurrence = section
                         .entries
                         .iter()
-                        .filter(|e| {
-                            e.key.provider == provider && e.key.name == identity_name(&row.name)
-                        })
+                        .filter(|e| e.key.header == header && e.key.name == name)
                         .count();
                     section.entries.push(Entry {
                         key: EntryKey {
-                            section: format!(
-                                "{}:{}",
-                                section.title,
-                                sections.iter().filter(|s| s.title == section.title).count()
-                            ),
-                            provider: provider.clone(),
-                            name: identity_name(&row.name).into(),
+                            card: card_key.clone(),
+                            header: header.clone(),
+                            name: name.into(),
                             occurrence,
                         },
-                        provider: provider.clone(),
+                        header: header.clone(),
                         accent,
                         row: row.clone(),
-                        details: Vec::new(),
+                        meters: Vec::new(),
                     });
                     attach_meter = row.health.is_some();
                 } else {
@@ -147,130 +141,60 @@ impl Dashboard {
         self.sections.iter().flat_map(|s| &s.entries)
     }
 
-    pub fn render(&self, nav: &Navigation, width: usize) -> Rendered {
-        self.render_animated(nav, width, 0)
-    }
-
-    pub fn render_animated(&self, nav: &Navigation, width: usize, tick: u64) -> Rendered {
+    /// Every line of the dashboard at `width` cells; `tick` drives the
+    /// container indicators' breathing (0 holds them still).
+    pub fn render(&self, nav: &Navigation, width: usize, tick: u64) -> Rendered {
         let mut result = Rendered::default();
         for section in &self.sections {
             if !result.lines.is_empty() {
                 result.lines.push(Line::default());
             }
             let attention = section.entries.iter().filter(|e| e.attention()).count();
-            let note = if attention > 0 {
-                format!(
-                    "{attention} {} attention",
-                    if attention == 1 { "needs" } else { "need" }
-                )
-            } else {
-                String::new()
-            };
+            let mut notes = Vec::new();
+            if section.stale {
+                notes.push("STALE".to_string());
+            }
+            if attention > 0 {
+                let verb = if attention == 1 { "NEEDS" } else { "NEED" };
+                notes.push(format!("{attention} {verb} ATTENTION"));
+            }
             result.lines.push(pair(
                 &section.title.to_uppercase(),
-                &note,
+                &notes.join(" · "),
                 width,
                 TEXT,
                 AMBER,
             ));
             result.lines.push(Line::default());
             let name_width = ACCOUNT_WIDTH.min(width.saturating_sub(4) / 2);
-            let mut provider = "";
+            let mut header = "";
             for entry in &section.entries {
-                if entry.provider != provider {
-                    if !provider.is_empty() {
+                if entry.header != header {
+                    if !header.is_empty() {
                         result.lines.push(Line::default());
                     }
-                    provider = &entry.provider;
-                    if !provider.is_empty() {
+                    header = &entry.header;
+                    if !header.is_empty() {
                         result.lines.push(Line::from(Span::styled(
-                            cards::truncate(&provider.to_uppercase(), width),
+                            truncate(&header.to_uppercase(), width),
                             Style::default().fg(entry.accent),
                         )));
                     }
                 }
                 let start = result.lines.len();
                 let selected = nav.selected.as_ref() == Some(&entry.key);
-                let marker = if selected { "›" } else { " " };
-                if let Some(state) = entry.row.container_state {
-                    let (badge, color) = cards::container_badge(state, entry.row.health, tick);
-                    let name = identity_name(&entry.row.name).to_uppercase();
-                    let detail = cards::container_detail(&entry.row);
-                    let line = Line::from(vec![
-                        Span::styled(
-                            format!("{marker} {name:width$}  ", width = name_width),
-                            Style::default().fg(entry.accent),
-                        ),
-                        Span::styled(badge, Style::default().fg(color)),
-                        Span::styled(format!("  {detail}"), Style::default().fg(MUTED)),
-                    ]);
-                    if line.width() <= width {
-                        result.lines.push(line);
-                    } else {
-                        result
-                            .lines
-                            .extend(wrapped(&line.to_string(), width, color));
-                    }
-                } else if entry.row.percent.is_some() {
-                    result
-                        .lines
-                        .extend(detail_lines(&entry.row, entry.accent, false, width));
-                } else {
-                    let name = identity_name(&entry.row.name).to_uppercase();
-                    let detail = entry
-                        .row
-                        .detail
-                        .as_deref()
-                        .unwrap_or_default()
-                        .to_uppercase();
-                    // Allow a long account to use one of the two gap cells,
-                    // keeping the value column fixed without repeating its name.
-                    let name_cells = Line::from(name.as_str()).width();
-                    let account_width = name_width.max(name_cells.min(name_width + 1));
-                    let gap = name_width + 2 - account_width;
-                    let detail_width = width.saturating_sub(name_width + 4);
-                    if width < 28 || name_cells > account_width {
-                        result.lines.extend(wrapped(
-                            &format!("{marker} {name}"),
-                            width,
-                            entry.accent,
-                        ));
-                        result.lines.extend(wrapped(
-                            &detail,
-                            width,
-                            value_color(None, entry.row.health),
-                        ));
-                    } else {
-                        let line = Line::from(vec![
-                            Span::styled(
-                                format!("{marker} "),
-                                Style::default().fg(value_color(None, entry.row.health)),
-                            ),
-                            Span::styled(
-                                pad(&name, account_width),
-                                Style::default().fg(entry.accent),
-                            ),
-                            Span::raw(" ".repeat(gap)),
-                            Span::styled(
-                                cards::truncate(&detail, detail_width),
-                                Style::default().fg(value_color(None, entry.row.health)),
-                            ),
-                        ]);
-                        result.lines.push(line);
-                        if Line::from(detail.as_str()).width() > detail_width {
-                            result.lines.extend(wrapped(&detail, width, MUTED));
-                        }
-                    }
-                }
+                result
+                    .lines
+                    .extend(entry_lines(entry, selected, name_width, width, tick));
                 if selected {
                     if let Some(line) = result.lines.get_mut(start) {
                         *line = line.clone().style(Style::default().bg(SELECTION));
                     }
                 }
-                for detail in &entry.details {
+                for meter in &entry.meters {
                     result
                         .lines
-                        .extend(detail_lines(detail, entry.accent, entry.stale(), width));
+                        .extend(meter_lines(meter, entry.accent, entry.stale(), width));
                 }
                 if selected {
                     result.selected = Some(start..result.lines.len());
@@ -281,26 +205,72 @@ impl Dashboard {
     }
 }
 
-fn rgb(value: Option<(u8, u8, u8)>) -> Color {
-    value.map_or(VIOLET_LIGHT, |(r, g, b)| Color::Rgb(r, g, b))
+/// An entry's own row: a container with its badge, a standalone meter, or an
+/// account with its detail in the value column (wrapping when narrow).
+fn entry_lines(
+    entry: &Entry,
+    selected: bool,
+    name_width: usize,
+    cells: usize,
+    tick: u64,
+) -> Vec<Line<'static>> {
+    let marker = if selected { "›" } else { " " };
+    let row = &entry.row;
+    let name = identity_name(&row.name).to_uppercase();
+    if let Some(state) = row.container_state {
+        let (badge, color) = cards::container_badge(state, row.health, tick);
+        let detail = cards::container_detail(row);
+        let line = Line::from(vec![
+            Span::styled(
+                format!("{marker} {}  ", pad(&name, name_width)),
+                Style::default().fg(entry.accent),
+            ),
+            Span::styled(badge, Style::default().fg(color)),
+            Span::styled(format!("  {detail}"), Style::default().fg(MUTED)),
+        ]);
+        return if line.width() <= cells {
+            vec![line]
+        } else {
+            wrap(&line.to_string(), cells, color)
+        };
+    }
+    if row.percent.is_some() {
+        return meter_lines(row, entry.accent, false, cells);
+    }
+    let detail = row.detail.as_deref().unwrap_or_default().to_uppercase();
+    let value_color = cards::severity_color(severity(None, row.health), MUTED);
+    // Allow a long account to use one of the two gap cells, keeping the value
+    // column fixed without repeating its name.
+    let name_cells = width(&name);
+    let account_width = name_width.max(name_cells.min(name_width + 1));
+    if cells < ACCOUNT_ROW_MIN_W || name_cells > account_width {
+        let mut lines = wrap(&format!("{marker} {name}"), cells, entry.accent);
+        lines.extend(wrap(&detail, cells, value_color));
+        return lines;
+    }
+    let detail_width = cells.saturating_sub(name_width + 4);
+    let mut lines = vec![Line::from(vec![
+        Span::styled(format!("{marker} "), Style::default().fg(value_color)),
+        Span::styled(pad(&name, account_width), Style::default().fg(entry.accent)),
+        Span::raw(" ".repeat(name_width + 2 - account_width)),
+        Span::styled(
+            truncate(&detail, detail_width),
+            Style::default().fg(value_color),
+        ),
+    ])];
+    if width(&detail) > detail_width {
+        lines.extend(wrap(&detail, cells, MUTED));
+    }
+    lines
 }
 
-fn detail_lines(row: &CardRow, accent: Color, stale: bool, width: usize) -> Vec<Line<'static>> {
-    let mut meter = row.clone();
-    meter.detail = None;
-    if stale {
-        meter.detail = Some("STALE".into());
-    }
-    if meter.accent.is_none() {
-        if let Color::Rgb(r, g, b) = accent {
-            meter.accent = Some((r, g, b));
-        }
-    }
-    let mut lines = if width < 55 {
-        wrapped(
+/// A meter row and its reset detail beneath it, aligned to the value column.
+fn meter_lines(row: &CardRow, accent: Color, stale: bool, width: usize) -> Vec<Line<'static>> {
+    let label = row.name.to_uppercase();
+    let mut lines = if width < WIDE_METER_MIN_W {
+        wrap(
             &format!(
-                "{}  {}%{}",
-                row.name,
+                "{label}  {}%{}",
                 row.percent.unwrap_or(0),
                 if stale { " · STALE" } else { "" }
             ),
@@ -308,8 +278,16 @@ fn detail_lines(row: &CardRow, accent: Color, stale: bool, width: usize) -> Vec<
             accent,
         )
     } else {
-        meter.name = pad(&row.name.to_uppercase(), METER_LABEL_WIDTH);
-        let mut lines = cards::card_row_lines_sized(
+        let meter = CardRow {
+            name: pad(&label, METER_LABEL_W),
+            detail: stale.then(|| "STALE".into()),
+            accent: row.accent.or(match accent {
+                Color::Rgb(r, g, b) => Some((r, g, b)),
+                _ => None,
+            }),
+            ..row.clone()
+        };
+        let mut lines = cards::card_row_lines(
             std::slice::from_ref(&meter),
             1,
             width,
@@ -317,14 +295,18 @@ fn detail_lines(row: &CardRow, accent: Color, stale: bool, width: usize) -> Vec<
             gauge_width(width),
         );
         let rendered: String = lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
-        if !rendered.contains(&row.name.to_uppercase()) {
-            lines.extend(wrapped(&row.name, width, accent));
+        if !rendered.contains(&label) {
+            lines.extend(wrap(&label, width, accent));
         }
         lines
     };
     if let Some(detail) = &row.detail {
-        let indent = if width >= 55 { VALUE_COLUMN - 2 } else { 0 };
-        for mut line in wrapped(
+        let indent = if width >= WIDE_METER_MIN_W {
+            VALUE_COLUMN - 2
+        } else {
+            0
+        };
+        for mut line in wrap(
             &display_reset_detail(detail),
             width.saturating_sub(indent),
             MUTED,
@@ -434,96 +416,10 @@ fn identity_name(text: &str) -> &str {
     text.trim().trim_start_matches('▸').trim()
 }
 
-fn value_color(percent: Option<u8>, health: Option<Health>) -> Color {
-    if percent >= Some(90) || health == Some(Health::Bad) {
-        RED
-    } else if percent >= Some(75) || health == Some(Health::Warn) {
-        AMBER
-    } else {
-        MUTED
-    }
-}
-
-fn pad(text: &str, width: usize) -> String {
-    let clipped = cards::truncate(text, width);
-    format!(
-        "{}{}",
-        clipped,
-        " ".repeat(width.saturating_sub(Line::from(clipped.as_str()).width()))
-    )
-}
-
-pub fn pair(
-    left: &str,
-    right: &str,
-    width: usize,
-    left_color: Color,
-    right_color: Color,
-) -> Line<'static> {
-    let left = left.to_uppercase();
-    let right = right.to_uppercase();
-    let right_w = Line::from(right.as_str()).width().min(width / 2);
-    let right = cards::truncate(&right, right_w);
-    let left_w = width.saturating_sub(right_w + usize::from(!right.is_empty()) * 2);
-    let left = cards::truncate(&left, left_w);
-    let gap = width
-        .saturating_sub(Line::from(left.as_str()).width() + Line::from(right.as_str()).width());
-    Line::from(vec![
-        Span::styled(left, Style::default().fg(left_color)),
-        Span::raw(" ".repeat(gap)),
-        Span::styled(right, Style::default().fg(right_color)),
-    ])
-}
-
-// Wrap before layout so all details are budgeted and reachable with page keys.
-fn wrapped(text: &str, width: usize, color: Color) -> Vec<Line<'static>> {
-    if width == 0 {
-        return Vec::new();
-    }
-    let indent = if width > 4 { 2 } else { 0 };
-    let body_w = width - indent;
-    let mut chunks = Vec::new();
-    let mut line = String::new();
-    for ch in text.to_uppercase().chars() {
-        let mut next = line.clone();
-        next.push(ch);
-        if ch == '\n' {
-            chunks.push(std::mem::take(&mut line));
-            continue;
-        }
-        if Line::from(next.as_str()).width() > body_w {
-            if ch == ' ' {
-                chunks.push(std::mem::take(&mut line));
-                continue;
-            }
-            if let Some(split) = line.rfind(' ').filter(|&split| split > 0) {
-                chunks.push(line[..split].to_owned());
-                line = line[split + 1..].to_owned();
-            } else {
-                chunks.push(std::mem::take(&mut line));
-            }
-        }
-        if Line::from(ch.to_string()).width() <= body_w {
-            line.push(ch);
-        }
-    }
-    if !line.is_empty() {
-        chunks.push(line);
-    }
-    chunks
-        .into_iter()
-        .map(|line| {
-            Line::from(Span::styled(
-                format!("{}{}", " ".repeat(indent), line.trim_end()),
-                Style::default().fg(color),
-            ))
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collect::Health;
 
     fn card(rows: Vec<CardRow>) -> SideCard {
         SideCard {
@@ -533,6 +429,7 @@ mod tests {
             rows,
             summary: String::new(),
             left: false,
+            stale: false,
         }
     }
 
@@ -555,22 +452,19 @@ mod tests {
     }
 
     fn fixture() -> Dashboard {
-        Dashboard::from_cards(
-            &[card(vec![
-                CardRow {
-                    name: "✻ Claude".into(),
-                    section: true,
-                    ..CardRow::default()
-                },
-                account("▸ Personal", "active"),
-                meter("5h window", 9),
-                meter("weekly", 42),
-                meter("model weekly", 100),
-                account("Work", "Stale 1d"),
-                meter("monthly", 95),
-            ])],
-            false,
-        )
+        Dashboard::from_cards(&[card(vec![
+            CardRow {
+                name: "✻ Claude".into(),
+                header: true,
+                ..CardRow::default()
+            },
+            account("▸ Personal", "active"),
+            meter("5h window", 9),
+            meter("weekly", 42),
+            meter("model weekly", 100),
+            account("Work", "Stale 1d"),
+            meter("monthly", 95),
+        ])])
     }
 
     fn text(rendered: &Rendered) -> String {
@@ -590,9 +484,8 @@ mod tests {
     #[test]
     fn long_account_names_are_displayed_once_without_moving_the_value_column() {
         let name = "sam-rivera_acmecorp";
-        let dashboard =
-            Dashboard::from_cards(&[card(vec![account(name, "biz · unlimited")])], false);
-        let rendered = text(&dashboard.render(&Navigation::default(), 82));
+        let dashboard = Dashboard::from_cards(&[card(vec![account(name, "biz · unlimited")])]);
+        let rendered = text(&dashboard.render(&Navigation::default(), 82, 0));
         assert_eq!(rendered.matches("SAM-RIVERA_ACMECORP").count(), 1);
         let row = rendered
             .lines()
@@ -601,8 +494,8 @@ mod tests {
         assert_eq!(row.find("BIZ"), Some(VALUE_COLUMN));
         assert!(!rendered.contains('…'));
         let name = "a_much_longer_account_name";
-        let dashboard = Dashboard::from_cards(&[card(vec![account(name, "active")])], false);
-        let rendered = text(&dashboard.render(&Navigation::default(), 82));
+        let dashboard = Dashboard::from_cards(&[card(vec![account(name, "active")])]);
+        let rendered = text(&dashboard.render(&Navigation::default(), 82, 0));
         assert_eq!(rendered.matches(&name.to_uppercase()).count(), 1);
         assert!(!rendered.contains('…'));
     }
@@ -610,7 +503,7 @@ mod tests {
     #[test]
     fn account_meter_and_reset_values_share_a_column() {
         for width in [55, 65, 82, 102] {
-            let rendered = fixture().render(&Navigation::default(), width);
+            let rendered = fixture().render(&Navigation::default(), width, 0);
             for line in &rendered.lines {
                 let text = line.to_string();
                 if let Some(column) = text.chars().position(|ch| "█▏▎▍▌▋▊▉░".contains(ch))
@@ -632,7 +525,7 @@ mod tests {
         let mut row = meter("5h window", 9);
         row.detail = Some("91% left · reset in 2h · TODAY 14:30 CDT".into());
         for width in [32, 55, 82, 102] {
-            let lines = detail_lines(&row, VIOLET_LIGHT, false, width);
+            let lines = meter_lines(&row, VIOLET_LIGHT, false, width);
             assert!(!lines[0].to_string().contains("RESET"));
             let details = lines
                 .iter()
@@ -662,7 +555,7 @@ mod tests {
     fn all_quotas_and_stale_state_are_visible_without_interaction() {
         let dashboard = fixture();
         assert_eq!(dashboard.entries().count(), 2);
-        let rendered = dashboard.render(&Navigation::default(), 82);
+        let rendered = dashboard.render(&Navigation::default(), 82, 0);
         let text = text(&rendered);
         assert!(text.contains("100%"));
         assert!(text.contains("95%"));
@@ -683,7 +576,7 @@ mod tests {
     #[test]
     fn one_hundred_percent_fills_the_entire_bar_even_when_stale() {
         for stale in [false, true] {
-            let lines = detail_lines(
+            let lines = meter_lines(
                 &meter("model weekly", 100),
                 Color::Rgb(217, 119, 87),
                 stale,
@@ -714,7 +607,7 @@ mod tests {
                     for stale in [false, true] {
                         let mut row = meter("weekly", percent);
                         row.detail = detail.map(str::to_owned);
-                        let lines = detail_lines(&row, Color::Rgb(217, 119, 87), stale, width);
+                        let lines = meter_lines(&row, Color::Rgb(217, 119, 87), stale, width);
                         let line: String = lines[0]
                             .spans
                             .iter()
@@ -747,7 +640,7 @@ mod tests {
         let teal = Color::Rgb(16, 163, 127);
         dashboard.sections[0].entries[0].accent = coral;
         dashboard.sections[0].entries[1].accent = teal;
-        let rendered = dashboard.render(&Navigation::default(), 82);
+        let rendered = dashboard.render(&Navigation::default(), 82, 0);
         let content = text(&rendered);
         assert!(content.contains("5H WINDOW"));
         assert!(content.contains("MODEL WEEKLY"));
@@ -766,22 +659,18 @@ mod tests {
 
     #[test]
     fn selection_follows_identity_through_refresh_and_reordering() {
-        let original = Dashboard::from_cards(
-            &[card(vec![account("one", "a"), account("two", "b")])],
-            false,
-        );
+        let original =
+            Dashboard::from_cards(&[card(vec![account("one", "a"), account("two", "b")])]);
         let mut nav = Navigation::default();
         nav.sync(&original);
         nav.move_selection(&original, 1);
         let key = nav.selected.clone();
-        let refreshed = Dashboard::from_cards(
-            &[card(vec![account("▸ two", "changed"), account("one", "a")])],
-            false,
-        );
+        let refreshed =
+            Dashboard::from_cards(&[card(vec![account("▸ two", "changed"), account("one", "a")])]);
         nav.sync(&refreshed);
         assert_eq!(nav.selected, key);
-        assert!(text(&refreshed.render(&nav, 60)).contains("CHANGED"));
-        let empty = Dashboard::from_cards(&[], false);
+        assert!(text(&refreshed.render(&nav, 60, 0)).contains("CHANGED"));
+        let empty = Dashboard::from_cards(&[]);
         nav.sync(&empty);
         nav.move_selection(&empty, -1);
         assert!(nav.selected.is_none());
@@ -789,25 +678,22 @@ mod tests {
 
     #[test]
     fn ordinary_custom_content_and_orphan_meters_remain_reachable() {
-        let dashboard = Dashboard::from_cards(
-            &[card(vec![
-                CardRow {
-                    name: "Service Checks".into(),
-                    section: true,
-                    ..CardRow::default()
-                },
-                CardRow {
-                    name: "/Some/Long/Path/With_A_Case_Sensitive_Name".into(),
-                    ..CardRow::default()
-                },
-                meter("standalone", 32),
-            ])],
-            false,
-        );
+        let dashboard = Dashboard::from_cards(&[card(vec![
+            CardRow {
+                name: "Service Checks".into(),
+                header: true,
+                ..CardRow::default()
+            },
+            CardRow {
+                name: "/Some/Long/Path/With_A_Case_Sensitive_Name".into(),
+                ..CardRow::default()
+            },
+            meter("standalone", 32),
+        ])]);
         assert_eq!(dashboard.entries().count(), 2);
         let mut nav = Navigation::default();
         nav.sync(&dashboard);
-        let rendered = text(&dashboard.render(&nav, 30));
+        let rendered = text(&dashboard.render(&nav, 30, 0));
         assert!(rendered.contains("SERVICE CHECKS"));
         assert!(rendered.contains("/SOME/LONG/PATH"));
         assert!(rendered.contains("32%"));
@@ -822,7 +708,7 @@ mod tests {
         let mut nav = Navigation::default();
         nav.sync(&dashboard);
         for width in 0..110 {
-            for line in dashboard.render(&nav, width).lines {
+            for line in dashboard.render(&nav, width, 0).lines {
                 assert!(line.width() <= width, "width {width}: {line:?}");
                 assert!(!line
                     .spans
@@ -838,7 +724,7 @@ mod tests {
         let mut nav = Navigation::default();
         nav.sync(&dashboard);
         nav.move_selection(&dashboard, 1);
-        let rendered = dashboard.render(&nav, 40);
+        let rendered = dashboard.render(&nav, 40, 0);
         let selected = rendered.selected.as_ref().unwrap();
         let start = rendered.start(6, 0);
         assert!((start..start + 6).contains(&selected.start));
@@ -880,9 +766,9 @@ mod tests {
                 ..CardRow::default()
             });
         }
-        let dashboard = Dashboard::from_cards(&[card(rows)], false);
-        let first = text(&dashboard.render_animated(&Navigation::default(), 82, 0));
-        let next = text(&dashboard.render_animated(&Navigation::default(), 82, 2));
+        let dashboard = Dashboard::from_cards(&[card(rows)]);
+        let first = text(&dashboard.render(&Navigation::default(), 82, 0));
+        let next = text(&dashboard.render(&Navigation::default(), 82, 2));
         assert_eq!(first, next); // Motion changes only the indicator's brightness.
         assert_ne!(
             cards::container_badge(State::Running, Some(Health::Good), 0).1,
@@ -902,7 +788,7 @@ mod tests {
         assert!(!first.contains("RUNNING"));
         assert!(!first.contains("RESTARTING"));
         for width in 0..110 {
-            let rendered = dashboard.render_animated(&Navigation::default(), width, 7);
+            let rendered = dashboard.render(&Navigation::default(), width, 7);
             assert!(rendered.lines.iter().all(|line| line.width() <= width));
         }
         for state in [State::Paused, State::Stopped] {

@@ -56,14 +56,9 @@ pub fn resolve(toggles: &std::collections::HashMap<String, bool>) -> Vec<bool> {
 }
 
 /// Draw the whole sky: the ambient starfield and glint stars, then every
-/// enabled flyer from the registry.
-pub fn render(ctx: &Ctx, enabled: &[bool], buf: &mut Buffer) {
-    render_motion(ctx, enabled, true, buf);
-}
-
-/// With motion off only the fixed starfield remains. Data and timers keep
-/// updating; decorative motion never needs to be running to use the app.
-pub fn render_motion(ctx: &Ctx, enabled: &[bool], motion: bool, buf: &mut Buffer) {
+/// enabled flyer from the registry. With motion off only the fixed
+/// starfield remains — data and timers keep updating regardless.
+pub fn render(ctx: &Ctx, enabled: &[bool], motion: bool, buf: &mut Buffer) {
     let calm = Ctx {
         tick: if motion { ctx.tick / 3 + 83 } else { 0 },
         area: ctx.area,
@@ -89,6 +84,24 @@ fn mix(x: u32, y: u32) -> u32 {
     h ^ (h >> 16)
 }
 
+/// Brightness 0..=cycle/2 rising and falling over `cycle` ticks, offset by a
+/// per-star `phase` so neighbors never pulse in step.
+fn twinkle(tick: u64, phase: u64, cycle: u64) -> u32 {
+    let t = (tick + phase) % cycle;
+    (cycle / 2 - (cycle as i64 / 2 - t as i64).unsigned_abs() % (cycle / 2 + 1)) as u32
+}
+
+/// Where a flyer enters: a hashed column in the half of the sky it travels
+/// away from, so it crosses the screen rather than leaving at once.
+fn entry_x(area: Rect, h: u32, dx: i32) -> i32 {
+    let half_w = (area.width as u32 / 2).max(1);
+    if dx > 0 {
+        area.x as i32 + (h % half_w) as i32
+    } else {
+        area.right() as i32 - (h % half_w) as i32
+    }
+}
+
 // --- Ambience: always on. ---
 
 // Two depth layers, both stationary: far stars are dim, near stars bright
@@ -107,13 +120,11 @@ fn star_pass(area: Rect, buf: &mut Buffer, tick: u64, density: u32, chars: &[cha
                 continue;
             }
             let ch = chars[(h / density) as usize % chars.len()];
-            let phase = ((h >> 7) as u64) % CYCLE;
-            let t = (tick / 2 + phase) % CYCLE;
-            let level = CYCLE / 2 - (CYCLE as i64 / 2 - t as i64).unsigned_abs() % (CYCLE / 2 + 1);
+            let level = twinkle(tick / 2, (h >> 7) as u64, CYCLE);
             let color = if near {
-                near_star_color(level as u32, h)
+                near_star_color(level, h)
             } else {
-                far_star_color(level as u32)
+                far_star_color(level)
             };
             if let Some(cell) = buf.cell_mut((x, y)) {
                 cell.set_char(ch);
@@ -123,7 +134,7 @@ fn star_pass(area: Rect, buf: &mut Buffer, tick: u64, density: u32, chars: &[cha
     }
 }
 
-// Near stars carry color like the poster: violet, amber, and sky-blue mixed
+// Near stars carry color: violet, amber, and sky-blue mixed
 // in with the white ones, muted at low twinkle and vivid at the peak.
 fn near_star_color(level: u32, h: u32) -> Color {
     let tint = match h % 23 {
@@ -164,9 +175,7 @@ fn sparkles(tick: u64, area: Rect, buf: &mut Buffer) {
             if !h.is_multiple_of(1913) {
                 continue;
             }
-            let phase = ((h >> 7) as u64) % CYCLE;
-            let t = (tick / 3 + phase) % CYCLE;
-            let level = CYCLE / 2 - (CYCLE as i64 / 2 - t as i64).unsigned_abs() % (CYCLE / 2 + 1);
+            let level = twinkle(tick / 3, (h >> 7) as u64, CYCLE);
             let center = match (h >> 11) % 3 {
                 0 => VIOLET_LIGHT,
                 1 => Color::Rgb(252, 211, 77),
@@ -248,12 +257,7 @@ fn comets(ctx: &Ctx, buf: &mut Buffer) {
             continue;
         }
         let h = mix((tick / cycle) as u32, seed);
-        let half_w = (area.width as u32 / 2).max(1);
-        let sx = if dx > 0 {
-            area.x as i32 + (h % half_w) as i32
-        } else {
-            area.right() as i32 - (h % half_w) as i32
-        };
+        let sx = entry_x(area, h, dx);
         let sy_px = area.y as i32 * 2 + ((h >> 9) % (area.height as u32 / 2).max(1)) as i32;
         let head = (sx + t as i32 * dx, sy_px + t as i32 * dy);
         let (tx, ty) = (dx.signum(), dy.signum());
@@ -299,12 +303,7 @@ fn shooting_stars(ctx: &Ctx, buf: &mut Buffer) {
             continue;
         }
         let h = mix((tick / cycle) as u32, seed);
-        let half_w = (area.width as u32 / 2).max(1);
-        let sx = if dx > 0 {
-            area.x as i32 + (h % half_w) as i32
-        } else {
-            area.right() as i32 - (h % half_w) as i32
-        };
+        let sx = entry_x(area, h, dx);
         // Start in the upper half of the sky (pixel rows), falling from there.
         let sy = area.y as i32 * 2 + ((h >> 9) % area.height as u32) as i32;
         let head = (sx + t as i32 * dx, sy + t as i32);
@@ -326,8 +325,8 @@ mod tests {
         let enabled = vec![true; FLYERS.len()];
         let mut first = Buffer::empty(area);
         let mut later = Buffer::empty(area);
-        render_motion(&Ctx { tick: 1, area }, &enabled, false, &mut first);
-        render_motion(&Ctx { tick: 1000, area }, &enabled, false, &mut later);
+        render(&Ctx { tick: 1, area }, &enabled, false, &mut first);
+        render(&Ctx { tick: 1000, area }, &enabled, false, &mut later);
         assert_eq!(first, later);
     }
 
@@ -359,7 +358,7 @@ mod tests {
             let area = Rect::new(0, 0, w, h);
             let mut buf = Buffer::empty(area);
             for tick in (0..400).step_by(3) {
-                render(&Ctx { tick, area }, &all_on, &mut buf);
+                render(&Ctx { tick, area }, &all_on, true, &mut buf);
             }
         }
     }

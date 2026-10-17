@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use insomnia::cards::SideCard;
 use insomnia::collect::{CardRow, Health};
+use insomnia::dashboard::{Dashboard, Navigation};
 use insomnia::power::{Kind, PowerStatus};
 use insomnia::sky;
 use insomnia::ui::{draw, ViewState};
@@ -33,12 +34,7 @@ fn main() {
     let hdr = |accent: (u8, u8, u8), name: &str| CardRow {
         name: name.into(),
         accent: Some(accent),
-        section: true,
-        ..CardRow::default()
-    };
-    let group = |accent: (u8, u8, u8), name: &str| CardRow {
-        name: name.into(),
-        accent: Some(accent),
+        header: true,
         ..CardRow::default()
     };
     let bar = |accent: (u8, u8, u8), name: &str, percent, detail: &str| CardRow {
@@ -50,25 +46,21 @@ fn main() {
     };
 
     let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-    let mut state = ViewState {
-        tick,
-        elapsed: Duration::from_secs(2537),
-        total: Some(Duration::from_secs(7200)),
-        remaining: Some(Duration::from_secs(4663)),
-        kinds: vec![Kind::Display, Kind::Idle],
-        power: PowerStatus {
-            on_ac: true,
-            percent: Some(100),
-        },
-        // Mirrors `[dashboard] combined = true`: one pre-folded card — section
-        // headers, long account names, details wide enough to force growth —
-        // rendered inside the status box.
-        cards: vec![SideCard {
-            title: "dashboard".into(),
-            glyph: "✦".into(),
-            accent: (148, 163, 184),
-            rows: vec![
-                group((148, 163, 184), "✦ ai usage"),
+    // Mirrors `[dashboard] combined = true` with the AI usage card and docker.
+    let card = |title: &str, accent, rows: Vec<CardRow>| SideCard {
+        title: title.into(),
+        glyph: "✦".into(),
+        accent,
+        summary: format!("{} items", rows.len()),
+        rows,
+        left: false,
+        stale: false,
+    };
+    let cards = vec![
+        card(
+            "ai usage",
+            (148, 163, 184),
+            vec![
                 hdr((217, 119, 87), "✻ claude"),
                 status(
                     Health::Warn,
@@ -85,7 +77,7 @@ fn main() {
                     100,
                     "reset in 2d · Sat 11:59",
                 ),
-                // Blank rows between services: what `space_sections` inserts.
+                // Blank rows between services: what `space_headers` inserts.
                 plain(""),
                 hdr((16, 163, 127), "◎ codex"),
                 status(Health::Bad, "▸ personal account", "pro · 96% used · active"),
@@ -104,8 +96,12 @@ fn main() {
                 plain(""),
                 hdr((167, 139, 250), "⧉ copilot"),
                 status(Health::Good, "▸ example team", "biz · unlimited"),
-                plain(""),
-                group((59, 130, 246), "≋ docker"),
+            ],
+        ),
+        card(
+            "docker",
+            (59, 130, 246),
+            vec![
                 container("restarting", Health::Warn, "worker", "restarting"),
                 container(
                     "running",
@@ -133,17 +129,36 @@ fn main() {
                     "paused · up 2 hours (paused)",
                 ),
             ],
-            summary: "2 sections".into(),
-            left: false,
-        }],
-        merged: true,
-        sky: vec![true; sky::FLYERS.len()],
-        motion: true,
-        navigation: Default::default(),
+        ),
+    ];
+    let dashboard = Dashboard::from_cards(&cards);
+    let navigation = Navigation {
+        selected: dashboard.entries().nth(2).map(|e| e.key.clone()),
+        ..Navigation::default()
     };
-    let dashboard = insomnia::dashboard::Dashboard::from_cards(&state.cards, true);
-    state.navigation.selected = dashboard.entries().nth(2).map(|e| e.key.clone());
-    terminal.draw(|f| draw(f, &state)).unwrap();
+    let sky_on = vec![true; sky::FLYERS.len()];
+    let power = PowerStatus {
+        on_ac: true,
+        percent: Some(100),
+    };
+    let state = ViewState {
+        tick,
+        elapsed: Duration::from_secs(2537),
+        total: Some(Duration::from_secs(7200)),
+        remaining: Some(Duration::from_secs(4663)),
+        kinds: &[Kind::Display, Kind::Idle],
+        power: &power,
+        cards: &cards,
+        dashboard: Some(&dashboard),
+        navigation: &navigation,
+        sky: &sky_on,
+        motion: true,
+    };
+    terminal
+        .draw(|f| {
+            draw(f, &state);
+        })
+        .unwrap();
 
     let buf = terminal.backend().buffer();
     if html {

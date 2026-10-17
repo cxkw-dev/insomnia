@@ -3,21 +3,30 @@
 //! the starfield never stutters on a stalled subprocess.
 //!
 //! Each source gets its own thread: a hanging command only ever delays its
-//! own card, never the others and never the sky.
+//! own card, never the others and never the sky, and a command that runs
+//! past its deadline is killed along with everything it started.
 
-use std::process::Command;
-use std::sync::mpsc::{self, Receiver};
+use std::io::Read;
+use std::os::unix::process::CommandExt;
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::config::{accent_rgb, CardConfig};
+use crate::config::CardConfig;
 use crate::power::PowerStatus;
+use crate::theme::{accent_rgb, Rgb};
 
 const BASE_POLL: Duration = Duration::from_secs(10);
-/// A custom card never renders more rows than this, however chatty its command.
-const MAX_ROWS: usize = 32;
+/// A custom card shows at most this many of its command's rows; the rest
+/// collapse into one "+N more rows" line.
+pub const MAX_ROWS: usize = 64;
+/// Meter values from here up read as a warning, and from [`BAD_PCT`] up as
+/// critical — the same cutoffs the AI usage script uses for its dots.
+pub const WARN_PCT: u8 = 75;
+pub const BAD_PCT: u8 = 90;
 
 /// Ordered so that sorting puts the rows needing attention first.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize)]
@@ -26,8 +35,20 @@ pub enum Health {
     Bad,
     Warn,
     Good,
-    /// Present but dormant — a steady slate dot instead of a pulsing one.
+    /// Present but dormant — a steady slate dot.
     Off,
+}
+
+/// How urgent a row is, from its own health and its meter, if either needs
+/// attention.
+pub fn severity(percent: Option<u8>, health: Option<Health>) -> Option<Health> {
+    if percent >= Some(BAD_PCT) || health == Some(Health::Bad) {
+        Some(Health::Bad)
+    } else if percent >= Some(WARN_PCT) || health == Some(Health::Warn) {
+        Some(Health::Warn)
+    } else {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -60,74 +81,76 @@ pub struct Container {
     pub health: Health,
 }
 
-/// One row of a custom card, parsed from a line of command output. The
-/// default value is a blank spacer row: no dot, no text, no meter.
+/// One dashboard row, parsed from a line of card output (or built from a
+/// container). The default value is a blank spacer row. Serialized as-is
+/// for the menu bar app, which reads `health`, `name`, `detail`, `accent`,
+/// `section`, and `percent`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct CardRow {
     pub container_state: Option<ContainerState>,
     pub health: Option<Health>,
     pub name: String,
     pub detail: Option<String>,
-    /// Section headers (`hdr|accent|text`) carry their accent color here.
-    pub accent: Option<(u8, u8, u8)>,
-    /// `hdr` rows are visual section dividers. Other accent-only rows are
-    /// card headers synthesized by the combined dashboard.
-    pub section: bool,
-    /// Utilization meters (`bar|accent|label|percent|detail`) carry a value
-    /// from 0–100 here. The optional detail is typically a reset time.
+    /// The accent of a header or meter row.
+    pub accent: Option<Rgb>,
+    /// An `hdr|accent|text` row: a group header within a card, such as one
+    /// provider in the AI usage card.
+    #[serde(rename = "section")]
+    pub header: bool,
+    /// A `bar|accent|label|percent|detail` meter's 0–100 value. The detail
+    /// is typically a reset time.
     pub percent: Option<u8>,
 }
 
-#[derive(Clone, Debug)]
-pub struct CardData {
-    pub rows: Vec<CardRow>,
+impl CardRow {
+    /// A spacer: no dot, no text, no meter — just vertical room.
+    pub fn is_blank(&self) -> bool {
+        self.health.is_none()
+            && self.percent.is_none()
+            && !self.header
+            && self.name.trim().is_empty()
+    }
 }
 
 pub enum Update {
     Power(PowerStatus),
     /// None: docker isn't installed or the daemon is down.
     Docker(Option<Vec<Container>>),
-    /// None: the card's command failed. The index matches the config order.
-    Card(usize, Option<CardData>),
+    /// The card at this config index: its rows, or why the run failed.
+    Card(usize, Result<Vec<CardRow>, String>),
 }
 
 /// Spawn one thread per data source, all reporting into a single channel.
-/// Threads exit on their own once the receiver is dropped.
-pub fn spawn(docker: bool, cards: Vec<CardConfig>) -> Receiver<Update> {
+/// Each thread exits after its next poll once the receiver is dropped.
+/// Card commands get `timeout` to finish before they are killed.
+pub fn spawn(docker: bool, cards: Vec<CardConfig>, timeout: Duration) -> Receiver<Update> {
     let (tx, rx) = mpsc::channel();
-    {
-        let tx = tx.clone();
-        thread::spawn(move || loop {
-            if tx.send(Update::Power(PowerStatus::poll())).is_err() {
-                break;
-            }
-            thread::sleep(BASE_POLL);
-        });
-    }
+    poll_every(&tx, BASE_POLL, || Update::Power(PowerStatus::poll()));
     // Docker gets its own thread: a wedged daemon can hang `docker ps` for a
     // long time, and that must never stall the power readings.
     if docker {
-        let tx = tx.clone();
-        thread::spawn(move || loop {
-            if tx.send(Update::Docker(poll_docker())).is_err() {
-                break;
-            }
-            thread::sleep(BASE_POLL);
-        });
+        poll_every(&tx, BASE_POLL, || Update::Docker(poll_docker()));
     }
     for (i, card) in cards.into_iter().enumerate() {
-        let tx = tx.clone();
-        thread::spawn(move || {
-            let every = Duration::from_secs(card.interval.max(2));
-            loop {
-                if tx.send(Update::Card(i, poll_card(&card))).is_err() {
-                    break;
-                }
-                thread::sleep(every);
-            }
+        let every = Duration::from_secs(card.interval);
+        poll_every(&tx, every, move || {
+            Update::Card(i, poll_card(&card, timeout))
         });
     }
     rx
+}
+
+fn poll_every(
+    tx: &Sender<Update>,
+    every: Duration,
+    mut poll: impl FnMut() -> Update + Send + 'static,
+) {
+    let tx = tx.clone();
+    thread::spawn(move || {
+        while tx.send(poll()).is_ok() {
+            thread::sleep(every);
+        }
+    });
 }
 
 fn poll_docker() -> Option<Vec<Container>> {
@@ -187,78 +210,146 @@ fn parse_container(line: &str) -> Option<Container> {
     })
 }
 
-pub fn poll_card(cfg: &CardConfig) -> Option<CardData> {
-    let out = Command::new("sh")
+/// Run a card's command and parse its stdout into rows. The command runs in
+/// its own process group, so on timeout everything it started — `curl`,
+/// subshells — is killed with it rather than orphaned.
+pub fn poll_card(cfg: &CardConfig, timeout: Duration) -> Result<Vec<CardRow>, String> {
+    let mut child = Command::new("sh")
         .args(["-c", &cfg.command])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .map_err(|e| format!("could not start: {e}"))?;
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+    let status = wait_or_kill(&mut child, timeout)
+        .ok_or_else(|| format!("timed out after {}s", timeout.as_secs()))?;
+    let stdout = stdout.join().unwrap_or_default();
+    if !status.success() {
+        let stderr = stderr.join().unwrap_or_default();
+        let why = stderr.lines().map(str::trim).find(|l| !l.is_empty());
+        return Err(match (status.code(), why) {
+            (Some(code), Some(why)) => format!("exit {code}: {why}"),
+            (Some(code), None) => format!("exit {code}"),
+            (None, _) => "killed by a signal".into(),
+        });
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let rows = text
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .take(MAX_ROWS)
-        .map(parse_row)
-        .collect();
-    Some(CardData { rows })
+    Ok(parse_rows(&stdout))
 }
 
-/// The card row protocol: `ok|name|detail`, `warn|name`, `bad|name|detail`,
-/// and `off|name|detail` get a health dot and columns; `hdr|accent|text` is
-/// a colored section header; `bar|accent|label|percent|detail` is an inline
-/// utilization meter; anything else is a plain text row.
-fn parse_row(line: &str) -> CardRow {
-    let meter: Vec<&str> = line.splitn(5, '|').map(str::trim).collect();
-    if meter.first() == Some(&"bar") && meter.len() >= 4 {
-        if let (Some(rgb), Ok(percent)) = (accent_rgb(meter[1]), meter[3].parse::<u8>()) {
-            if percent <= 100 {
-                return CardRow {
-                    name: meter[2].to_string(),
-                    detail: meter
-                        .get(4)
-                        .filter(|d| !d.is_empty())
-                        .map(|d| d.to_string()),
-                    accent: Some(rgb),
-                    percent: Some(percent),
-                    ..CardRow::default()
-                };
+/// Read a pipe to the end on its own thread, so a chatty command can never
+/// fill the pipe and deadlock against our wait.
+fn drain(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<String> {
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut bytes);
+        }
+        String::from_utf8_lossy(&bytes).into_owned()
+    })
+}
+
+fn wait_or_kill(child: &mut Child, timeout: Duration) -> Option<std::process::ExitStatus> {
+    extern "C" {
+        fn killpg(pgrp: i32, sig: i32) -> i32;
+    }
+    const SIGKILL: i32 = 9;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
+            _ => {
+                // SAFETY: plain syscall; the group id is our child's pid,
+                // which `process_group(0)` made a group leader.
+                unsafe { killpg(child.id() as i32, SIGKILL) };
+                let _ = child.wait();
+                return None;
             }
         }
     }
-    let parts: Vec<&str> = line.splitn(3, '|').map(str::trim).collect();
-    if parts.first() == Some(&"hdr") && parts.len() == 3 {
-        if let Some(rgb) = accent_rgb(parts[1]) {
-            return CardRow {
-                name: parts[2].to_string(),
-                accent: Some(rgb),
-                section: true,
-                ..CardRow::default()
-            };
-        }
+}
+
+fn parse_rows(stdout: &str) -> Vec<CardRow> {
+    let lines: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
+    let mut rows: Vec<CardRow> = lines.iter().take(MAX_ROWS).map(|l| parse_row(l)).collect();
+    if lines.len() > MAX_ROWS {
+        rows.push(CardRow {
+            name: format!("+{} more rows", lines.len() - MAX_ROWS),
+            ..CardRow::default()
+        });
     }
-    let health = match parts.first().copied() {
-        Some("ok") => Some(Health::Good),
-        Some("warn") => Some(Health::Warn),
-        Some("bad") => Some(Health::Bad),
-        Some("off") => Some(Health::Off),
-        _ => None,
+    rows
+}
+
+/// The card row protocol, one row per line of stdout:
+///
+/// - `ok|name|detail`, `warn|…`, `bad|…`, `off|…` — a health row (detail
+///   optional)
+/// - `hdr|accent|text` — a group header in that accent
+/// - `bar|accent|label|percent|detail` — a 0–100 meter (detail optional)
+///
+/// Anything else, including a malformed protocol line, is plain text.
+pub fn parse_row(line: &str) -> CardRow {
+    let text = || CardRow {
+        name: line.trim().to_string(),
+        ..CardRow::default()
     };
-    match health {
-        Some(h) if parts.len() >= 2 => CardRow {
-            health: Some(h),
-            name: parts[1].to_string(),
-            detail: parts
-                .get(2)
-                .filter(|d| !d.is_empty())
-                .map(|d| d.to_string()),
-            ..CardRow::default()
+    let Some((tag, rest)) = line.split_once('|') else {
+        return text();
+    };
+    let detail = |d: Option<&str>| d.map(str::trim).filter(|d| !d.is_empty()).map(String::from);
+    match tag.trim() {
+        "bar" => {
+            let f: Vec<&str> = rest.splitn(4, '|').map(str::trim).collect();
+            let percent = f.get(2).and_then(|p| p.parse::<f32>().ok());
+            match (f.first().and_then(|a| accent_rgb(a)), percent) {
+                (Some(accent), Some(p)) if (0.0..=100.0).contains(&p) && f.len() >= 3 => CardRow {
+                    name: f[1].to_string(),
+                    detail: detail(f.get(3).copied()),
+                    accent: Some(accent),
+                    percent: Some(p.round() as u8),
+                    ..CardRow::default()
+                },
+                _ => text(),
+            }
+        }
+        "hdr" => match rest.split_once('|') {
+            Some((accent, name)) => match accent_rgb(accent.trim()) {
+                Some(accent) => CardRow {
+                    name: name.trim().to_string(),
+                    accent: Some(accent),
+                    header: true,
+                    ..CardRow::default()
+                },
+                None => text(),
+            },
+            None => text(),
         },
-        _ => CardRow {
-            name: line.trim().to_string(),
-            ..CardRow::default()
-        },
+        tag => {
+            let health = match tag {
+                "ok" => Health::Good,
+                "warn" => Health::Warn,
+                "bad" => Health::Bad,
+                "off" => Health::Off,
+                _ => return text(),
+            };
+            let (name, d) = match rest.split_once('|') {
+                Some((name, d)) => (name, Some(d)),
+                None => (rest, None),
+            };
+            if name.trim().is_empty() {
+                return text();
+            }
+            CardRow {
+                health: Some(health),
+                name: name.trim().to_string(),
+                detail: detail(d),
+                ..CardRow::default()
+            }
+        }
     }
 }
 
@@ -284,7 +375,7 @@ mod tests {
         assert_eq!(r.health, None);
         assert_eq!(r.accent, Some((217, 119, 87)));
         assert_eq!(r.name, "✻ claude");
-        assert!(r.section);
+        assert!(r.header);
         assert_eq!(r.percent, None);
 
         // An unknown accent falls back to a plain text row.
@@ -300,12 +391,14 @@ mod tests {
         assert_eq!(r.name, "weekly");
         assert_eq!(r.detail.as_deref(), Some("resets Sun 03:49"));
         assert_eq!(r.accent, Some((16, 163, 127)));
-        assert!(!r.section);
+        assert!(!r.header);
         assert_eq!(r.percent, Some(72));
+        assert_eq!(parse_row("bar|teal|weekly|72.6").percent, Some(73));
 
         // Invalid percentages and accents remain visible as plain text.
         assert_eq!(parse_row("bar|teal|weekly|101").percent, None);
         assert_eq!(parse_row("bar|mauve|weekly|42").percent, None);
+        assert_eq!(parse_row("bar|teal|weekly").name, "bar|teal|weekly");
     }
 
     #[test]
@@ -325,6 +418,41 @@ mod tests {
         let r = parse_row("ok");
         assert_eq!(r.health, None);
         assert_eq!(r.name, "ok");
+        assert_eq!(parse_row("ok|").health, None);
+        assert_eq!(parse_row("ok|a|b|c").detail.as_deref(), Some("b|c"));
+    }
+
+    fn card(command: &str) -> CardConfig {
+        CardConfig {
+            title: "t".into(),
+            command: command.into(),
+            interval: 10,
+            glyph: None,
+            accent: None,
+            side: Default::default(),
+        }
+    }
+
+    #[test]
+    fn card_commands_report_failures_and_time_out() {
+        let ok = poll_card(&card("echo 'ok|a|b'; echo plain"), Duration::from_secs(5)).unwrap();
+        assert_eq!(ok.len(), 2);
+        let err = poll_card(&card("echo nope >&2; exit 3"), Duration::from_secs(5)).unwrap_err();
+        assert_eq!(err, "exit 3: nope");
+        let started = Instant::now();
+        let err = poll_card(&card("sleep 30 & sleep 30"), Duration::from_millis(300)).unwrap_err();
+        assert!(err.starts_with("timed out"), "{err}");
+        // The background `sleep` held stdout too; killing the whole group is
+        // what lets the reader finish instead of waiting it out.
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn long_output_is_capped_with_a_visible_remainder() {
+        let out: String = (0..MAX_ROWS + 5).map(|i| format!("row {i}\n")).collect();
+        let rows = parse_rows(&out);
+        assert_eq!(rows.len(), MAX_ROWS + 1);
+        assert_eq!(rows.last().unwrap().name, "+5 more rows");
     }
 
     #[test]

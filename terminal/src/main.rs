@@ -1,80 +1,80 @@
-use std::process::exit;
+use std::process::ExitCode;
 
-use insomnia::config::{self, Config, Outcome};
-use insomnia::power::{self, Kind};
+use insomnia::config::{self, Flags, Outcome};
+use insomnia::duration;
+use insomnia::power;
+use insomnia::theme::{ansi, ANSI_RESET, VIOLET_RGB};
 use insomnia::ui;
 
-fn main() {
-    let outcome = match config::parse(std::env::args().skip(1)) {
-        Ok(o) => o,
-        Err(e) => {
-            eprintln!("insomnia: {e}");
-            exit(2);
-        }
-    };
-    let cfg = match outcome {
-        Outcome::Help => {
+fn main() -> ExitCode {
+    let flags = match config::parse(std::env::args().skip(1)) {
+        Ok(Outcome::Run(flags)) => flags,
+        Ok(Outcome::Help) => {
             print!("{}", config::help());
-            return;
+            return ExitCode::SUCCESS;
         }
-        Outcome::Version => {
+        Ok(Outcome::Version) => {
             println!("insomnia {}", env!("CARGO_PKG_VERSION"));
-            return;
+            return ExitCode::SUCCESS;
         }
-        Outcome::Run(cfg) => cfg,
+        Err(e) => return fail(&e, 2),
     };
-    let file_cfg = match config::load_file(cfg.config_path.as_deref()) {
+    let file_cfg = match config::load_file(flags.config_path.as_deref()) {
         Ok(fc) => fc,
-        Err(e) => {
-            eprintln!("insomnia: {e}");
-            exit(2);
-        }
+        Err(e) => return fail(&e, 2),
     };
+    // Held until main returns; dropping them is what releases the Mac.
+    let _assertions: Vec<power::Assertion> =
+        match flags.kinds.iter().map(|k| power::create(*k)).collect() {
+            Ok(a) => a,
+            Err(e) => return fail(&e, 1),
+        };
 
-    let kinds = cfg.kinds();
-    let assertions: Vec<power::Assertion> = match kinds.iter().map(|k| power::create(*k)).collect()
-    {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("insomnia: {e}");
-            exit(1);
-        }
-    };
-
-    if cfg.quiet {
-        quiet_hold(&cfg, &kinds);
-    } else {
-        match ui::run(&cfg, &kinds, &file_cfg) {
-            Ok(elapsed) => println!(
-                "\x1b[38;2;167;139;250m☾ INSOMNIA\x1b[0m RELEASED — AWAKE FOR {}. SLEEP WELL.",
-                ui::fmt_hms(elapsed)
-            ),
-            Err(e) => {
-                eprintln!("insomnia: terminal error: {e}");
-                exit(1);
-            }
-        }
+    if flags.quiet {
+        quiet_hold(&flags);
+        return ExitCode::SUCCESS;
     }
-    drop(assertions);
+    match ui::run(&flags, &file_cfg) {
+        Ok(elapsed) => {
+            println!(
+                "{} RELEASED — AWAKE FOR {}. SLEEP WELL.",
+                wordmark(),
+                duration::clock(elapsed)
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(&format!("terminal error: {e}"), 1),
+    }
 }
 
-fn quiet_hold(cfg: &Config, kinds: &[Kind]) {
-    let names = kinds
+fn fail(message: &str, code: u8) -> ExitCode {
+    eprintln!("insomnia: {message}");
+    ExitCode::from(code)
+}
+
+fn wordmark() -> String {
+    format!("{}☾ INSOMNIA{ANSI_RESET}", ansi(VIOLET_RGB))
+}
+
+fn quiet_hold(flags: &Flags) {
+    let names = flags
+        .kinds
         .iter()
         .map(|k| k.label().to_uppercase())
         .collect::<Vec<_>>()
         .join(" + ");
-    let until = match cfg.timeout {
-        Some(d) => format!("FOR {}", config::human(d).to_uppercase()),
+    let until = match flags.timeout {
+        Some(d) => format!("FOR {}", duration::human(d).to_uppercase()),
         None => "UNTIL YOU CTRL-C".into(),
     };
-    println!("\x1b[38;2;167;139;250m☾ INSOMNIA\x1b[0m — KEEPING {names} AWAKE {until}");
-    match cfg.timeout {
+    println!("{} — KEEPING {names} AWAKE {until}", wordmark());
+    match flags.timeout {
         Some(d) => {
             std::thread::sleep(d);
             println!(
-                "\x1b[38;2;167;139;250m☾ INSOMNIA\x1b[0m RELEASED AFTER {}. SLEEP WELL.",
-                config::human(d).to_uppercase()
+                "{} RELEASED AFTER {}. SLEEP WELL.",
+                wordmark(),
+                duration::human(d).to_uppercase()
             );
         }
         None => loop {

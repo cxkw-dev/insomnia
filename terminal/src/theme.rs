@@ -3,6 +3,14 @@
 
 use ratatui::style::Color;
 
+/// A 24-bit color as raw channels, for math (scaling, fades) before it
+/// becomes a terminal [`Color`].
+pub type Rgb = (u8, u8, u8);
+
+pub const fn rgb(c: Rgb) -> Color {
+    Color::Rgb(c.0, c.1, c.2)
+}
+
 pub const TEXT: Color = Color::Rgb(226, 232, 240);
 pub const BACKGROUND: Color = Color::Rgb(17, 18, 29);
 pub const MUTED: Color = Color::Rgb(160, 167, 186);
@@ -13,54 +21,57 @@ pub const SLATE_500: Color = Color::Rgb(100, 116, 139);
 pub const SLATE_600: Color = Color::Rgb(71, 85, 105);
 pub const SLATE_700: Color = Color::Rgb(51, 65, 85);
 pub const VIOLET_LIGHT: Color = Color::Rgb(185, 166, 245);
-pub const GOLD: Color = Color::Rgb(251, 191, 36);
-pub const EMERALD: Color = Color::Rgb(145, 203, 181);
-pub const AMBER: Color = Color::Rgb(241, 196, 119);
+pub const GOLD: Color = rgb(GOLD_RGB);
+pub const EMERALD: Color = rgb(EMERALD_RGB);
+pub const AMBER: Color = rgb(AMBER_RGB);
 pub const RED: Color = Color::Rgb(243, 155, 155);
 
-/// Dot colors for the three row-health states, shared by every card.
-pub const HEALTH_GOOD: (u8, u8, u8) = (52, 211, 153);
-pub const HEALTH_WARN: (u8, u8, u8) = (251, 191, 36);
-pub const HEALTH_BAD: (u8, u8, u8) = (248, 113, 113);
+pub const GOLD_RGB: Rgb = (251, 191, 36);
+pub const EMERALD_RGB: Rgb = (145, 203, 181);
+pub const AMBER_RGB: Rgb = (241, 196, 119);
 
-// Pink on the left melting into violet on the right, like the poster.
-pub const GRADIENT: [(u8, u8, u8); 3] = [(244, 114, 182), (216, 96, 245), (147, 100, 250)];
+/// Named accents for cards and for `hdr` / `bar` rows. A config or row that
+/// names anything else is rejected (config) or falls back to text (rows).
+pub const ACCENTS: &[(&str, Rgb)] = &[
+    ("violet", (167, 139, 250)),
+    ("pink", (244, 114, 182)),
+    ("sky", (125, 211, 252)),
+    ("blue", (59, 130, 246)),
+    ("emerald", (52, 211, 153)),
+    ("gold", GOLD_RGB),
+    ("red", (248, 113, 113)),
+    ("slate", (148, 163, 184)),
+    ("coral", (217, 119, 87)),
+    ("teal", (16, 163, 127)),
+];
 
-pub fn gradient_rgb(t: f32) -> (u8, u8, u8) {
-    let t = t.clamp(0.0, 1.0) * 2.0;
-    let (a, b, frac) = if t < 1.0 {
-        (GRADIENT[0], GRADIENT[1], t)
-    } else {
-        (GRADIENT[1], GRADIENT[2], t - 1.0)
-    };
-    let lerp = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * frac) as u8;
-    (lerp(a.0, b.0), lerp(a.1, b.1), lerp(a.2, b.2))
+/// A card's default accent, and the docker card's.
+pub const VIOLET_RGB: Rgb = ACCENTS[0].1;
+pub const BLUE_RGB: Rgb = ACCENTS[3].1;
+
+pub fn accent_rgb(name: &str) -> Option<Rgb> {
+    ACCENTS.iter().find(|(n, _)| *n == name).map(|(_, c)| *c)
 }
 
-pub fn gradient(t: f32) -> Color {
-    let (r, g, b) = gradient_rgb(t);
-    Color::Rgb(r, g, b)
+pub fn accent_names() -> String {
+    ACCENTS
+        .iter()
+        .map(|(n, _)| *n)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
-pub fn scale(rgb: (u8, u8, u8), f: f32) -> Color {
+pub fn scale(c: Rgb, f: f32) -> Color {
     Color::Rgb(
-        (rgb.0 as f32 * f) as u8,
-        (rgb.1 as f32 * f) as u8,
-        (rgb.2 as f32 * f) as u8,
+        (c.0 as f32 * f) as u8,
+        (c.1 as f32 * f) as u8,
+        (c.2 as f32 * f) as u8,
     )
 }
 
-pub fn pulse(rgb: (u8, u8, u8), tick: u64) -> Color {
-    let phase = (tick % 24) as f32 / 24.0 * std::f32::consts::TAU;
-    scale(rgb, 0.65 + 0.35 * phase.sin())
+/// The 24-bit ANSI foreground escape for plain stdout (help, quiet mode).
+pub fn ansi(c: Rgb) -> String {
+    format!("\x1b[38;2;{};{};{}m", c.0, c.1, c.2)
 }
 
-/// Ping-pong a value into [0, 1] so animated gradients drift without a seam.
-pub fn tri(x: f32) -> f32 {
-    let m = x.rem_euclid(2.0);
-    if m <= 1.0 {
-        m
-    } else {
-        2.0 - m
-    }
-}
+pub const ANSI_RESET: &str = "\x1b[0m";

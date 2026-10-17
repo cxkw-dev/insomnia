@@ -3,18 +3,14 @@
 //! pixels, so the sky's trails get double vertical resolution and
 //! near-square pixels.
 
-use ratatui::{buffer::Buffer, layout::Rect, style::Color};
+use ratatui::{buffer::Buffer, layout::Rect};
 
-pub type Rgb = (u8, u8, u8);
-
-fn color(rgb: Rgb) -> Color {
-    Color::Rgb(rgb.0, rgb.1, rgb.2)
-}
+use crate::theme::{rgb, Rgb};
 
 /// Set a single pixel at (cell column, pixel row), merging with any half-block
 /// already in the cell so overlapping trails compose correctly (a comet
 /// crossing a shooting star occludes only its own pixels).
-pub fn set_px(x: i32, y_px: i32, rgb: Rgb, area: Rect, buf: &mut Buffer) {
+pub fn set_px(x: i32, y_px: i32, color: Rgb, area: Rect, buf: &mut Buffer) {
     let cy = y_px.div_euclid(2);
     if x < area.left() as i32
         || x >= area.right() as i32
@@ -26,7 +22,7 @@ pub fn set_px(x: i32, y_px: i32, rgb: Rgb, area: Rect, buf: &mut Buffer) {
     let Some(cell) = buf.cell_mut((x as u16, cy as u16)) else {
         return;
     };
-    let c = color(rgb);
+    let c = rgb(color);
     let top = y_px.rem_euclid(2) == 0;
     let sym = cell.symbol();
     if top {

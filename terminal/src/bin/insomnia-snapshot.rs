@@ -2,15 +2,24 @@
 //! same config loader, command runner, and row parser.
 
 use std::process::ExitCode;
+use std::thread;
+use std::time::Duration;
 
 use insomnia::{collect, config};
 use serde::Serialize;
+
+/// Per-card deadline. The app gives the whole snapshot 20s, and cards run
+/// in parallel, so this leaves room to report a slow card instead of being
+/// killed with nothing to say.
+const CARD_TIMEOUT: Duration = Duration::from_secs(15);
+
+const USAGE: &str = "usage: insomnia-snapshot [--config <path>]";
 
 #[derive(Serialize)]
 struct SnapshotCard<'a> {
     title: &'a str,
     rows: Vec<collect::CardRow>,
-    error: Option<&'static str>,
+    error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -21,59 +30,58 @@ struct Snapshot<'a> {
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
-    let explicit = match args.next() {
-        None => None,
-        Some(flag) if flag == "--config" => match args.next() {
-            Some(path) => Some(path),
-            None => {
-                eprintln!("insomnia-snapshot: --config needs a path");
-                return ExitCode::from(2);
-            }
-        },
-        _ => {
-            eprintln!("usage: insomnia-snapshot [--config path]");
-            return ExitCode::from(2);
+    let mut explicit = None;
+    while let Some(arg) = args.next() {
+        if arg == "-h" || arg == "--help" {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
         }
-    };
-    if args.next().is_some() {
-        eprintln!("usage: insomnia-snapshot [--config path]");
-        return ExitCode::from(2);
+        match config::config_arg(&arg, &mut args) {
+            Some(Ok(path)) => explicit = Some(path),
+            Some(Err(e)) => return fail(&e),
+            None => return fail(USAGE),
+        }
     }
 
     let cfg = match config::load_file(explicit.as_deref()) {
         Ok(cfg) => cfg,
-        Err(error) => {
-            eprintln!("insomnia-snapshot: {error}");
-            return ExitCode::from(2);
-        }
+        Err(e) => return fail(&e),
     };
-    let cards = cfg
-        .cards
-        .iter()
-        .map(|card| match collect::poll_card(card) {
-            Some(data) => SnapshotCard {
-                title: &card.title,
-                rows: data.rows,
-                error: None,
-            },
-            None => SnapshotCard {
-                title: &card.title,
-                rows: Vec::new(),
-                error: Some("Card command failed"),
-            },
-        })
-        .collect();
-    match serde_json::to_writer(
-        std::io::stdout(),
-        &Snapshot {
-            cards,
-            accounts: &cfg.accounts,
-        },
-    ) {
+    let cards = thread::scope(|scope| {
+        let runs: Vec<_> = cfg
+            .cards
+            .iter()
+            .map(|card| (card, scope.spawn(|| collect::poll_card(card, CARD_TIMEOUT))))
+            .collect();
+        runs.into_iter()
+            .map(|(card, run)| {
+                let result = run.join().unwrap_or_else(|_| Err("crashed".into()));
+                let (rows, error) = match result {
+                    Ok(rows) => (rows, None),
+                    Err(e) => (Vec::new(), Some(format!("Card command failed: {e}"))),
+                };
+                SnapshotCard {
+                    title: &card.title,
+                    rows,
+                    error,
+                }
+            })
+            .collect()
+    });
+    let snapshot = Snapshot {
+        cards,
+        accounts: &cfg.accounts,
+    };
+    match serde_json::to_writer(std::io::stdout(), &snapshot) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("insomnia-snapshot: {error}");
+        Err(e) => {
+            eprintln!("insomnia-snapshot: {e}");
             ExitCode::FAILURE
         }
     }
+}
+
+fn fail(message: &str) -> ExitCode {
+    eprintln!("insomnia-snapshot: {message}");
+    ExitCode::from(2)
 }
