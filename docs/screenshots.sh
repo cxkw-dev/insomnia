@@ -11,7 +11,9 @@ docs="$repo_root/docs"
 chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 [ -x "$chrome" ] || { echo "screenshots: needs Google Chrome" >&2; exit 1; }
 work=$(mktemp -d "${TMPDIR:-/tmp}/insomnia-shots.XXXXXX")
-trap 'rm -rf "$work"' EXIT
+app_pid=""
+# Also stop the preview app if the script dies while it is still up.
+trap 'if [ -n "$app_pid" ]; then kill "$app_pid" 2>/dev/null || true; fi; rm -rf "$work"' EXIT
 
 swiftc -O "$docs/frame.swift" -o "$work/frame"
 
@@ -66,14 +68,15 @@ TOML
 ready="$work/window"
 XDG_CONFIG_HOME="$work/xdg" INSOMNIA_PREVIEW_READY="$ready" \
   "$repo_root/dist/Insomnia Preview.app/Contents/MacOS/Insomnia" >/dev/null 2>&1 &
-app=$!
+app_pid=$!
 i=0
 until [ -s "$ready" ]; do
-  i=$((i + 1)); [ "$i" -lt 60 ] || { kill "$app"; echo "screenshots: preview never loaded" >&2; exit 1; }
+  i=$((i + 1)); [ "$i" -lt 60 ] || { echo "screenshots: preview never loaded" >&2; exit 1; }
   sleep 0.5
 done
 screencapture -x -o -l"$(cat "$ready")" "$work/popover.png"
-kill "$app"
-wait "$app" 2>/dev/null || true
+kill "$app_pid"
+wait "$app_pid" 2>/dev/null || true
+app_pid=""
 "$work/frame" "$work/popover.png" "$docs/menubar.png" 28
 printf 'wrote %s\n' "$docs/menubar.png"

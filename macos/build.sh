@@ -12,12 +12,13 @@ fi
 contents="$app/Contents"
 arch=$(uname -m)
 
-cd "$repo_root"
 cargo build --release --manifest-path "$repo_root/terminal/Cargo.toml" --bin insomnia-snapshot
+# Start from an empty bundle so resources dropped from the repo don't linger.
+rm -rf "$app"
 mkdir -p "$contents/MacOS" "$contents/Resources/Fonts" "$contents/Resources/Icons"
 # shellcheck disable=SC2086 # swift_flags is deliberately word-split
 swiftc -O -swift-version 6 -parse-as-library -target "${arch}-apple-macosx13.0" $swift_flags \
-  "$repo_root/macos/Sources/InsomniaApp.swift" -o "$contents/MacOS/Insomnia"
+  "$repo_root"/macos/Sources/*.swift -o "$contents/MacOS/Insomnia"
 cp "$repo_root/terminal/target/release/insomnia-snapshot" "$contents/MacOS/insomnia-snapshot"
 cp "$repo_root/macos/Fonts/Geist.ttf" "$contents/Resources/Fonts/Geist.ttf"
 cp "$repo_root/macos/Fonts/GeistMono.ttf" "$contents/Resources/Fonts/GeistMono.ttf"
