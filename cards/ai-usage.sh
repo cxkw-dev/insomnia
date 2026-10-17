@@ -11,7 +11,8 @@
 # Setup: `make setup` copies this script to ~/.config/insomnia/ and adds a
 # card that runs `ai-usage.sh all`. Needs jq and curl; Copilot rows also need
 # the GitHub CLI (gh). Nothing here is sent anywhere but the providers' own
-# usage endpoints, and every credential stays on this Mac.
+# usage endpoints, and every credential stays on this Mac. macOS only: it
+# leans on BSD `date -r`, `stat -f`, `base64 -D`, and the `security` Keychain.
 #
 # Accounts: whatever you're logged into right now shows up automatically
 # (Claude Code / Claude Desktop, the Codex CLI / Codex Desktop, every
@@ -34,6 +35,11 @@
 # Captured snapshots remain available for additional accounts. Refresh tokens
 # rotate, so a snapshot whose account is logged out everywhere eventually
 # decays and is tagged `stale <age>` rather than passing as a live reading.
+#
+# Refresh tokens are single-use and shared with the CLIs that own them, so a
+# token is refreshed only once its access token has expired or been refused
+# with a 401 — never because of a timeout, 429, or 5xx — and always under a
+# lock, since the TUI and the menu bar app both run this every 30s.
 
 PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 umask 077
@@ -57,15 +63,62 @@ LIVE_TTL=${AI_USAGE_TTL:-30}
 SNAPSHOT_TTL=${AI_USAGE_SNAPSHOT_TTL:-240}
 LIVE_RETRY=${AI_USAGE_RETRY:-60}
 SNAPSHOT_RETRY=${AI_USAGE_SNAPSHOT_RETRY:-900}
+LOCK_WAIT=20   # seconds to wait for another run's refresh before giving up
+LOCK_STALE=120 # a lock this old outlived any refresh (a few 15s calls)
+
+# http <curl args...> — curl's stdin carries the secret part (a `-K -`
+# config with the auth header, or a `--data-binary @-` body), so tokens stay
+# off argv where any `ps` could read them. Prints the body on 2xx; returns 2
+# on 401 so callers can tell a refused token from a flaky network, else 1.
+http() {
+  local out code
+  out=$(curl -s -m 15 -w '\n%{http_code}' "$@") || return 1
+  code=${out##*$'\n'}
+  case $code in
+    2??) printf '%s' "${out%$'\n'*}" ;;
+    401) return 2 ;;
+    *)   return 1 ;;
+  esac
+}
+
+# headers <header...> — a curl config on stdout for `http -K -`.
+headers() {
+  local h
+  for h in "$@"; do printf 'header = "%s"\n' "$h"; done
+}
+
+# with_lock <name> <cmd...> — run cmd while holding $CACHE/<name>.lock. Two
+# runs refreshing the same single-use refresh token at once can get the
+# whole token family revoked. A mkdir lock records the owning script's pid,
+# so one left by a killed run is taken over (or after LOCK_STALE regardless).
+with_lock() (
+  lock="$CACHE/$1.lock"; shift
+  waited=0
+  until mkdir "$lock" 2>/dev/null; do
+    owner=$(cat "$lock/pid" 2>/dev/null)
+    age=$(( $(date +%s) - $(stat -f %m "$lock" 2>/dev/null || date +%s) ))
+    if { [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; } || [ "$age" -ge "$LOCK_STALE" ]; then
+      # rename first so two waiters can't both clear it and both get in
+      mv "$lock" "$lock.dead.$$" 2>/dev/null && rm -rf "$lock.dead.$$"
+      continue
+    fi
+    [ "$waited" -ge "$LOCK_WAIT" ] && exit 1
+    sleep 1; waited=$(( waited + 1 ))
+  done
+  trap 'rm -rf "$lock"' EXIT
+  printf '%s' "$$" > "$lock/pid"
+  "$@"
+)
 
 dot() { # dot <pct-used>
-  p=${1%%.*}
+  local p=${1%%.*}
   if [ "${p:-0}" -ge 90 ] 2>/dev/null; then echo bad
   elif [ "${p:-0}" -ge 75 ] 2>/dev/null; then echo warn
   else echo ok; fi
 }
 
 when_full() { # when_full <epoch> -> "Sun Sep 6 21:51 CDT"
+  local year
   year=$(date -r "$1" '+%Y' 2>/dev/null) || return
   if [ "$year" = "$(date '+%Y')" ]; then
     date -r "$1" '+%a %b %-d %H:%M %Z' 2>/dev/null
@@ -79,6 +132,7 @@ trunc() { # trunc <name> — cap at the 19 chars the card's name column holds
 }
 
 cache_fresh() { # cache_fresh <key> <ttl-seconds>
+  local f age
   f="$CACHE/$1.json"
   [ -f "$f" ] || return 1
   age=$(( $(date +%s) - $(stat -f %m "$f") ))
@@ -86,6 +140,7 @@ cache_fresh() { # cache_fresh <key> <ttl-seconds>
 }
 
 cache_put() { # stdin -> cache
+  local tmp
   tmp="$CACHE/$1.json.tmp.$$"
   cat > "$tmp" && mv "$tmp" "$CACHE/$1.json" \
     || { rm -f "$tmp"; return 1; }
@@ -94,6 +149,7 @@ cache_put() { # stdin -> cache
 cache_stale() { cat "$CACHE/$1.json" 2>/dev/null; }
 
 retry_waiting() { # retry_waiting <key> <seconds>
+  local f age
   f="$CACHE/$1.failed"
   [ -f "$f" ] || return 1
   age=$(( $(date +%s) - $(stat -f %m "$f") ))
@@ -101,6 +157,7 @@ retry_waiting() { # retry_waiting <key> <seconds>
 }
 
 fetch() { # fetch <key> <ttl> <retry-seconds> <fn> <args...>
+  local key ttl retry out
   key=$1; ttl=$2; retry=$3; shift 3
   if out=$(cache_fresh "$key" "$ttl"); then printf '%s\n' "$out"; return 0; fi
   if retry_waiting "$key" "$retry"; then cache_stale "$key"; return; fi
@@ -119,6 +176,7 @@ fetch() { # fetch <key> <ttl> <retry-seconds> <fn> <args...>
 # is what stops that snapshot from passing as a live reading.
 STALE_AFTER=900
 staleness() {
+  local f age
   f="$CACHE/$1.json"
   [ -f "$f" ] || return 0
   age=$(( $(date +%s) - $(stat -f %m "$f") ))
@@ -133,6 +191,7 @@ staleness() {
 # "resets Mon 09:00" alone means something different at Sun 11pm than at
 # Mon 08:55 and the countdown removes that mental math.
 until_str() {
+  local now d
   now=$(date +%s)
   d=$(( ${1:-0} - now ))
   [ "$d" -gt 0 ] 2>/dev/null || { printf ''; return; }
@@ -147,6 +206,7 @@ until_str() {
 # until two samples exist, and blank again once the gap between them is too
 # short to be meaningful or so long (>1 day) it would average across noise.
 trend_note() {
+  local key label pct f now note prev pepoch ppct dt tmp
   key=$1; label=$2; pct=$3
   f="$TREND/$(printf '%s-%s' "$key" "$label" | tr -c '[:alnum:]._-' '-')"
   now=$(date +%s)
@@ -173,6 +233,8 @@ trend_note() {
 # Names arrive with a "▸ "/"  " active-login marker. Every available limit
 # gets its own meter, so a safe short window cannot hide a tight weekly one.
 usage_rows() {
+  local name accent encoded stale key meta plan summary hardstop windows max count d
+  local label pct reset detail remaining w event rel trend
   name=$1; accent=$2; encoded=$3; stale=$4; key=$5
   meta=$(printf '%s\n' "$encoded" | sed -n '1p')
   plan=$(printf '%s\n' "$meta" | cut -d'|' -f2)
@@ -222,6 +284,7 @@ usage_rows() {
 # roster_rows <service> <shown names...> — accounts.conf entries with no
 # matching live row appear dormant, so known accounts are never invisible.
 roster_rows() {
+  local svc s n
   svc=$1; shift
   [ -f "$DIR/accounts.conf" ] || return 0
   while read -r s n _; do
@@ -232,33 +295,66 @@ roster_rows() {
 
 # ---------------------------------------------------------------- codex ----
 
-codex_call() { # codex_call <access_token> <account_id>
+codex_call() { # codex_call <access_token> <account_id> — 2 on a 401
   if [ -n "$2" ]; then
-    $CURL -H "Authorization: Bearer $1" -H "chatgpt-account-id: $2" https://chatgpt.com/backend-api/wham/usage
+    headers "Authorization: Bearer $1" "chatgpt-account-id: $2"
   else
-    $CURL -H "Authorization: Bearer $1" https://chatgpt.com/backend-api/wham/usage
-  fi
+    headers "Authorization: Bearer $1"
+  fi | http -K - https://chatgpt.com/backend-api/wham/usage
 }
 
+# jwt_exp <jwt> — the token's `exp` claim (epoch seconds), blank if unreadable.
+jwt_exp() {
+  local p
+  p=$(printf '%s' "$1" | cut -d. -f2 | tr '_-' '/+')
+  case $(( ${#p} % 4 )) in 2) p="$p==" ;; 3) p="$p=" ;; esac
+  printf '%s' "$p" | base64 -D 2>/dev/null | jq -r '.exp // empty' 2>/dev/null
+}
+
+# Applied to `[auth.json, token response]` — the codex CLI's own merge.
+CODEX_MERGE='.[1] as $r | .[0]
+  | .tokens.access_token = $r.access_token
+  | (if $r.refresh_token then .tokens.refresh_token = $r.refresh_token else . end)
+  | (if $r.id_token then .tokens.id_token = $r.id_token else . end)
+  | .last_refresh = (now | todate)'
+
 codex_fetch() { # codex_fetch <auth.json path>
-  f=$1
+  local f=$1 tok acct exp rc
   tok=$(jq -r '.tokens.access_token // empty' "$f") || return 1
   acct=$(jq -r '.tokens.account_id // empty' "$f")
   [ -n "$tok" ] || return 1
-  codex_call "$tok" "$acct" && return 0
-  # stale access token — refresh the same way the codex CLI does
-  rt=$(jq -r '.tokens.refresh_token // empty' "$f")
-  [ -n "$rt" ] || return 1
-  resp=$($CURL -X POST https://auth.openai.com/oauth/token -H 'Content-Type: application/json' \
-    -d "{\"client_id\":\"$CODEX_CLIENT_ID\",\"grant_type\":\"refresh_token\",\"refresh_token\":\"$rt\",\"scope\":\"openid profile email\"}") || return 1
+  exp=$(jwt_exp "$tok")
+  # An undecodable exp isn't proof of expiry; let the server say 401.
+  if ! { [ -n "$exp" ] && [ "$exp" -le "$(date +%s)" ] 2>/dev/null; }; then
+    codex_call "$tok" "$acct"; rc=$?
+    [ "$rc" = 2 ] || return "$rc"
+  fi
+  with_lock "refresh-codex-$(basename "$(dirname "$f")")-$(basename "$f" .json)" \
+    codex_refresh "$f" "$tok"
+}
+
+# codex_refresh <auth.json path> <refused access token> — under the lock.
+codex_refresh() {
+  local f=$1 tok acct resp tmp rc
+  tok=$(jq -r '.tokens.access_token // empty' "$f")
+  acct=$(jq -r '.tokens.account_id // empty' "$f")
+  # Another run (or the CLI) may have refreshed while this one waited.
+  if [ -n "$tok" ] && [ "$tok" != "$2" ]; then
+    codex_call "$tok" "$acct"; rc=$?
+    [ "$rc" = 2 ] || return "$rc"
+  fi
+  jq -e '.tokens.refresh_token // empty' "$f" >/dev/null || return 1
+  # Refresh the same way the codex CLI does; the body is built from the file
+  # by jq and handed to curl on stdin, so the refresh token never hits argv.
+  resp=$(jq -c --arg c "$CODEX_CLIENT_ID" '
+      {client_id: $c, grant_type: "refresh_token",
+         refresh_token: .tokens.refresh_token, scope: "openid profile email"}' "$f" \
+    | http -X POST -H 'Content-Type: application/json' --data-binary @- \
+        https://auth.openai.com/oauth/token) || return 1
   tok=$(printf '%s' "$resp" | jq -r '.access_token // empty')
   [ -n "$tok" ] || return 1
   tmp="$f.tmp.$$"
-  jq --argjson r "$resp" '
-      .tokens.access_token = $r.access_token
-      | (if $r.refresh_token then .tokens.refresh_token = $r.refresh_token else . end)
-      | (if $r.id_token then .tokens.id_token = $r.id_token else . end)
-      | .last_refresh = (now | todate)' "$f" > "$tmp" \
+  { cat "$f"; printf '%s' "$resp"; } | jq -s "$CODEX_MERGE" > "$tmp" \
     && jq -e .tokens.access_token "$tmp" >/dev/null && mv "$tmp" "$f" && chmod 600 "$f" || rm -f "$tmp"
   codex_call "$tok" "$acct"
 }
@@ -297,7 +393,7 @@ codex_render() { # usage json on stdin -> meta row + one row per limit window
         if $spend != null then
           "\($spend.remaining | compact) of \($spend.limit | compact) credits left"
         elif ($credits.has_credits // false) and ($credits.balance != null) then
-          "\($credits.balance) credits left"
+          "\($credits.balance | tonumber | floor) credits left"
         elif ($credits.has_credits // false) and (($credits.approx_local_messages // null) != null) then
           # Message-metered plans have no dollar balance; the local/cloud
           # message estimate is the only human number they do get.
@@ -321,6 +417,7 @@ codex_render() { # usage json on stdin -> meta row + one row per limit window
 }
 
 codex_rows() {
+  local cur cur_id seen_ids names f name id m src ttl retry mirror cache_account out
   cur="${CODEX_HOME:-$HOME/.codex}/auth.json"
   cur_id=$(jq -r '.tokens.account_id // empty' "$cur" 2>/dev/null)
   seen_ids=""; names=""
@@ -380,7 +477,10 @@ claude_valid_uuid() {
 }
 
 claude_safe_storage_key() {
+  local safe
   safe=$(security find-generic-password -s "Claude Safe Storage" -w 2>/dev/null) || return 1
+  # openssl takes the passphrase (and below, the AES key) only as an argument;
+  # it's a short-lived local process, and the key alone grants no API access.
   openssl kdf -keylen 16 -kdfopt digest:SHA1 \
     -kdfopt "pass:$safe" -kdfopt salt:saltysalt -kdfopt iter:1003 \
     PBKDF2 2>/dev/null | tr -d ':\n'
@@ -391,6 +491,7 @@ claude_safe_storage_key() {
 # when safeStorage is unavailable, even the refreshed OAuth token in memory,
 # so the running child is the only live credential visible outside Electron.
 claude_desktop_process_token() {
+  local account pids pid line tok
   account=$(claude_desktop_account)
   [ -n "$account" ] || return 1
   pids=$(ps -awwxo pid=,command= 2>/dev/null | awk -v account="$account" '
@@ -411,6 +512,7 @@ claude_desktop_process_token() {
 # in config.json. Read only a non-expired inference token for the active
 # account; never copy it into the insomnia cache.
 claude_desktop_cached_token() {
+  local base account key nowms field enc plain tok
   base="$HOME/Library/Application Support/Claude"
   account=$(claude_desktop_account)
   [ -n "$account" ] && [ -f "$base/config.json" ] || return 1
@@ -437,6 +539,7 @@ claude_desktop_cached_token() {
 }
 
 claude_desktop_org() {
+  local base account org
   base="$HOME/Library/Application Support/Claude"
   account=$(claude_desktop_account)
   [ -n "$account" ] || return 1
@@ -485,6 +588,7 @@ claude_desktop_cookie_fetch() (
 
   work=$(mktemp -d "${TMPDIR:-/tmp}/insomnia-claude-usage.XXXXXX") || exit 1
   cleanup() {
+    local name
     for name in sessionKey sessionKeyV2 sessionKeyV3 sessionKeyLC sessionKeyV3LC lastActiveOrg; do
       rm -f "$work/$name.raw" "$work/$name"
     done
@@ -497,7 +601,7 @@ claude_desktop_cookie_fetch() (
   [ -n "$key" ] || exit 1
 
   read_cookie() {
-    name=$1
+    local name=$1 enc
     case "$name" in
       sessionKey|sessionKeyV2|sessionKeyV3|sessionKeyLC|sessionKeyV3LC|lastActiveOrg) ;;
       *) return 1 ;;
@@ -557,6 +661,7 @@ claude_desktop_cookie_fetch() (
 )
 
 claude_desktop_fetch() {
+  local tok
   tok=$(claude_desktop_process_token) || tok=""
   [ -n "$tok" ] && { claude_usage_call "$tok" && return 0; }
   tok=$(claude_desktop_cached_token) || tok=""
@@ -564,51 +669,91 @@ claude_desktop_fetch() {
   claude_desktop_cookie_fetch
 }
 
-claude_usage_call() {
-  $CURL -H "Authorization: Bearer $1" -H "anthropic-beta: oauth-2025-04-20" https://api.anthropic.com/api/oauth/usage
+claude_usage_call() { # claude_usage_call <access_token> — 2 on a 401
+  headers "Authorization: Bearer $1" "anthropic-beta: oauth-2025-04-20" \
+    | http -K - https://api.anthropic.com/api/oauth/usage
 }
 
+claude_keychain() {
+  security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null
+}
+
+# claude_expired <expiresAt ms> — anything but a future expiry counts.
+claude_expired() {
+  ! [ "${1:-0}" -gt "$(( $(date +%s) * 1000 ))" ] 2>/dev/null
+}
+
+# claude_refresh <refresh_token> — the token response from whichever OAuth
+# host answers. The body reaches curl on stdin, never argv.
+claude_refresh() {
+  local body host
+  body=$(printf '{"grant_type":"refresh_token","refresh_token":"%s","client_id":"%s"}' \
+    "$1" "$CLAUDE_CLIENT_ID")
+  for host in platform.claude.com console.anthropic.com; do
+    printf '%s' "$body" \
+      | http -X POST -H 'Content-Type: application/json' --data-binary @- \
+          "https://$host/v1/oauth/token" \
+      && return 0
+  done
+  return 1
+}
+
+# Applied to `[credentials, token response]`; only where the result is
+# persisted (Keychain or snapshot file) differs between callers.
+CLAUDE_MERGE='.[1] as $r | .[0]
+  | .claudeAiOauth.accessToken = $r.access_token
+  | (if $r.refresh_token then .claudeAiOauth.refreshToken = $r.refresh_token else . end)
+  | .claudeAiOauth.expiresAt = ((now + ($r.expires_in // 3600)) * 1000 | floor)'
+
 claude_fetch_current() {
+  local desktop_account cred tok rc
   desktop_account=$(claude_desktop_account)
   if [ -n "$desktop_account" ] && [ "$desktop_account" = "$(claude_cli_account)" ]; then
     claude_desktop_fetch && return 0
   fi
 
-  cred=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null) || return 1
-  tok=$(printf '%s' "$cred" | jq -r '.claudeAiOauth.accessToken // empty')
-  exp=$(printf '%s' "$cred" | jq -r '.claudeAiOauth.expiresAt // 0')
-  nowms=$(( $(date +%s) * 1000 ))
   # The desktop session was unavailable, so fall back to Claude Code's
-  # Keychain token. Renew the Keychain item itself when it expires so both
-  # this card and the next CLI invocation share the rotated credentials.
-  if [ -n "$tok" ] && [ "$exp" -gt "$nowms" ] 2>/dev/null; then
-    claude_usage_call "$tok" && return 0
+  # Keychain token.
+  cred=$(claude_keychain) || return 1
+  tok=$(printf '%s' "$cred" | jq -r '.claudeAiOauth.accessToken // empty')
+  if [ -n "$tok" ] \
+    && ! claude_expired "$(printf '%s' "$cred" | jq -r '.claudeAiOauth.expiresAt // 0')"; then
+    claude_usage_call "$tok"; rc=$?
     # A network/provider failure with a nominally valid token is not evidence
     # that it should be rotated. Let fetch() serve the marked stale cache.
-    return 1
+    [ "$rc" = 2 ] || return "$rc"
   fi
+  with_lock refresh-claude-keychain claude_refresh_keychain "$tok"
+}
 
+# claude_refresh_keychain <refused access token> — under the lock. Renews the
+# Keychain item itself so both this card and the next CLI invocation share
+# the rotated credentials.
+claude_refresh_keychain() {
+  local cred tok rt resp updated rc
+  cred=$(claude_keychain) || return 1
+  tok=$(printf '%s' "$cred" | jq -r '.claudeAiOauth.accessToken // empty')
+  # Another run (or Claude Code) may have refreshed while this one waited.
+  if [ -n "$tok" ] && [ "$tok" != "$1" ]; then
+    claude_usage_call "$tok"; rc=$?
+    [ "$rc" = 2 ] || return "$rc"
+  fi
   rt=$(printf '%s' "$cred" | jq -r '.claudeAiOauth.refreshToken // empty')
   [ -n "$rt" ] || return 1
-  body="{\"grant_type\":\"refresh_token\",\"refresh_token\":\"$rt\",\"client_id\":\"$CLAUDE_CLIENT_ID\"}"
-  resp=$($CURL -X POST https://platform.claude.com/v1/oauth/token -H 'Content-Type: application/json' -d "$body") \
-    || resp=$($CURL -X POST https://console.anthropic.com/v1/oauth/token -H 'Content-Type: application/json' -d "$body") \
-    || return 1
+  resp=$(claude_refresh "$rt") || return 1
   tok=$(printf '%s' "$resp" | jq -r '.access_token // empty')
   [ -n "$tok" ] || return 1
-  updated=$(printf '%s' "$cred" | jq --argjson r "$resp" '
-      .claudeAiOauth.accessToken = $r.access_token
-      | (if $r.refresh_token then .claudeAiOauth.refreshToken = $r.refresh_token else . end)
-      | .claudeAiOauth.expiresAt = ((now + ($r.expires_in // 3600)) * 1000 | floor)') \
-    || return 1
+  updated=$(printf '%s\n%s' "$cred" "$resp" | jq -s "$CLAUDE_MERGE") || return 1
   [ -n "$updated" ] || return 1
+  # `security` takes a password only as an argument or from a tty prompt.
   security add-generic-password -U -a "$(id -un)" -s "Claude Code-credentials" -w "$updated" >/dev/null \
     || return 1
   claude_usage_call "$tok"
 }
 
 claude_snapshot() { # claude_snapshot <path> — write the live keychain login there
-  cred=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null) || return 1
+  local cred email account org tmp
+  cred=$(claude_keychain) || return 1
   email=$(jq -r '.oauthAccount.emailAddress // empty' "$HOME/.claude.json" 2>/dev/null)
   account=$(claude_cli_account)
   org=$(jq -r '.oauthAccount.organizationUuid // empty' "$HOME/.claude.json" 2>/dev/null)
@@ -620,26 +765,31 @@ claude_snapshot() { # claude_snapshot <path> — write the live keychain login t
 }
 
 claude_fetch_file() { # claude_fetch_file <snapshot path>
-  f=$1
+  local f=$1 tok rc
   tok=$(jq -r '.claudeAiOauth.accessToken // empty' "$f")
-  exp=$(jq -r '.claudeAiOauth.expiresAt // 0' "$f")
-  nowms=$(( $(date +%s) * 1000 ))
-  if [ -n "$tok" ] && [ "$exp" -gt "$nowms" ] 2>/dev/null; then
-    claude_usage_call "$tok" && return 0
+  if [ -n "$tok" ] \
+    && ! claude_expired "$(jq -r '.claudeAiOauth.expiresAt // 0' "$f")"; then
+    claude_usage_call "$tok"; rc=$?
+    [ "$rc" = 2 ] || return "$rc"
+  fi
+  with_lock "refresh-claude-$(basename "$f" .json)" claude_refresh_file "$f" "$tok"
+}
+
+# claude_refresh_file <snapshot path> <refused access token> — under the lock.
+claude_refresh_file() {
+  local f=$1 tok rt resp tmp rc
+  tok=$(jq -r '.claudeAiOauth.accessToken // empty' "$f")
+  if [ -n "$tok" ] && [ "$tok" != "$2" ]; then
+    claude_usage_call "$tok"; rc=$?
+    [ "$rc" = 2 ] || return "$rc"
   fi
   rt=$(jq -r '.claudeAiOauth.refreshToken // empty' "$f")
   [ -n "$rt" ] || return 1
-  body="{\"grant_type\":\"refresh_token\",\"refresh_token\":\"$rt\",\"client_id\":\"$CLAUDE_CLIENT_ID\"}"
-  resp=$($CURL -X POST https://platform.claude.com/v1/oauth/token -H 'Content-Type: application/json' -d "$body") \
-    || resp=$($CURL -X POST https://console.anthropic.com/v1/oauth/token -H 'Content-Type: application/json' -d "$body") \
-    || return 1
+  resp=$(claude_refresh "$rt") || return 1
   tok=$(printf '%s' "$resp" | jq -r '.access_token // empty')
   [ -n "$tok" ] || return 1
   tmp="$f.tmp.$$"
-  jq --argjson r "$resp" '
-      .claudeAiOauth.accessToken = $r.access_token
-      | (if $r.refresh_token then .claudeAiOauth.refreshToken = $r.refresh_token else . end)
-      | .claudeAiOauth.expiresAt = ((now + ($r.expires_in // 3600)) * 1000 | floor)' "$f" > "$tmp" \
+  { cat "$f"; printf '%s' "$resp"; } | jq -s "$CLAUDE_MERGE" > "$tmp" \
     && jq -e .claudeAiOauth.accessToken "$tmp" >/dev/null && mv "$tmp" "$f" && chmod 600 "$f" || rm -f "$tmp"
   claude_usage_call "$tok"
 }
@@ -735,6 +885,8 @@ claude_render() { # usage json on stdin -> meta row + one row per limit window
 }
 
 claude_rows() {
+  local cur_email cur_account desktop_account legacy_desktop legacy_count f account em
+  local seen seen_accounts names name m live mirror out cache_account
   cur_email=$(jq -r '.oauthAccount.emailAddress // empty' "$HOME/.claude.json" 2>/dev/null)
   cur_account=$(claude_cli_account)
   desktop_account=$(claude_desktop_account)
@@ -814,14 +966,31 @@ claude_rows() {
 # -------------------------------------------------------------- copilot ----
 
 copilot_fetch() { # copilot_fetch <gh username>
+  local tok
   tok=$(gh auth token --user "$1" 2>/dev/null)
   [ -n "$tok" ] || return 1
-  $CURL -H "Authorization: Bearer $tok" -H "User-Agent: GitHubCopilotChat/0.26" https://api.github.com/copilot_internal/user
+  headers "Authorization: Bearer $tok" "User-Agent: GitHubCopilotChat/0.26" \
+    | http -K - https://api.github.com/copilot_internal/user
+}
+
+# copilot_accounts — "<login> <active>" for each working github.com login.
+# Newer gh has `auth status --json hosts`; older ones only print prose, so
+# scrape that as a fallback.
+copilot_accounts() {
+  local json
+  if json=$(gh auth status --json hosts 2>/dev/null) \
+    && printf '%s' "$json" | jq -e '.hosts | type == "object"' >/dev/null 2>&1; then
+    printf '%s' "$json" \
+      | jq -r '.hosts["github.com"][]? | select(.state == "success") | "\(.login) \(.active)"'
+  else
+    gh auth status 2>&1 \
+      | awk '/Logged in to github.com account/ {u=$7} /Active account:/ {if (u != "") print u, $NF; u=""}'
+  fi
 }
 
 copilot_rows() {
-  accts=$(gh auth status 2>&1 \
-    | awk '/Logged in to github.com account/ {u=$7} /Active account:/ {if (u != "") print u, $NF; u=""}')
+  local accts names u act m out
+  accts=$(copilot_accounts)
   names=""
   while read -r u act; do
     [ -n "$u" ] || continue
@@ -873,8 +1042,15 @@ EOF
 # -------------------------------------------------------------- capture ----
 
 capture() {
-  svc=$1; name=$2
+  local svc=$1 name=$2 src email
   [ -n "$svc" ] && [ -n "$name" ] || { echo "usage: ai-usage.sh capture <codex|claude> <name>" >&2; exit 1; }
+  # The name becomes a file name and a protocol field: no paths, no '|'.
+  # Spelled out rather than A-Z, which some locales collate loosely.
+  case $name in
+    .*|*[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*)
+      echo "invalid name '$name': use letters, digits, '.', '_' and '-', not starting with '.'" >&2
+      exit 1 ;;
+  esac
   case $svc in
     codex)
       src="${CODEX_HOME:-$HOME/.codex}/auth.json"
