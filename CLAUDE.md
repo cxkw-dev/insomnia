@@ -100,7 +100,9 @@ One render thread, one thread per data source, one channel between them.
   `theme.rs` — the shared palette.
 - `macos/Sources/` — the SwiftUI menu bar app: `Snapshot.swift` (decoding
   and the async helper runner), `Accounts.swift` (turns snapshot rows into
-  provider accounts once per refresh), `DashboardModel.swift`,
+  provider accounts once per refresh), `AccountVisibility.swift` (reads and
+  writes `hidden` flags in `accounts.conf` for the popover's account
+  editor), `DashboardModel.swift`,
   `DashboardView.swift`, `Appearance.swift`, and `InsomniaApp.swift`.
   `macos/build.sh` compiles every file and bundles the Rust helper, fonts,
   and icons; `dist/` is ignored.
@@ -117,6 +119,10 @@ One render thread, one thread per data source, one channel between them.
   token only when it has expired or the API answered 401, under a
   `with_lock` lock, re-reading credentials after acquiring it. Refresh tokens
   are single-use and shared with the providers' own CLIs.
+- **Account visibility lives in `accounts.conf`.** `<service> <name> hidden`
+  stops the script fetching and emitting that account; the menu bar editor
+  only rewrites that file. Account names in rows are never truncated by the
+  script, since they double as these identifiers.
 - **The default is focused and uppercase.** Keep one frame with the session
   anchored above a scrollable dashboard. `combined = false` retains separate
   cards. Source commands and data are not rewritten; only displayed text is

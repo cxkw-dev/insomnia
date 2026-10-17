@@ -116,6 +116,10 @@ Click the moon to open the popover. It shows:
   times. An account near its limit, stale, or logged out is tinted.
 - **Every other card** below, as plain rows.
 
+**Accounts** in the footer opens a list of every AI account with a switch.
+Turn one off and it disappears from both apps, and the card stops fetching
+it; turn it back on any time. See [turning an account off](#turning-an-account-off).
+
 The switch beside the wordmark keeps the **display** awake; the moon turns
 amber while it's on. Turn it off or quit the app to release it. (The
 terminal app is the one for system, lid-closed, or timed holds.)
@@ -215,6 +219,17 @@ Whatever you're logged into right now appears on its own, marked `▸`.
 - **Always list an account**, even while it's logged out, in
   `~/.config/insomnia/ai-usage/accounts.conf` (`<service> <name>` per line).
   It shows as `not logged in` until a login or capture with that name exists.
+
+### Turning an account off
+
+Use the switches under **Accounts** in the menu bar popover, or edit
+`accounts.conf` yourself: add `hidden` after an account's name and it
+disappears from both apps, and the card stops fetching it. Nothing is
+deleted — remove the word (or flip the switch back) to bring it back:
+
+```text
+claude old-job hidden
+```
 
 A captured account keeps refreshing while it's logged in somewhere the card
 can see. Once it's logged out everywhere it eventually goes `stale`, and the
