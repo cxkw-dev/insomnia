@@ -705,6 +705,24 @@ private struct DashboardView: View {
     }
 }
 
+#if DESIGN_PREVIEW
+/// `make screenshots` runs the design preview against fixture cards. Once the
+/// first snapshot lands, the window drops its title bar and its number goes
+/// to INSOMNIA_PREVIEW_READY so the script can capture just the popover.
+@MainActor
+private enum PreviewCapture {
+    static func ready() {
+        guard let path = ProcessInfo.processInfo.environment["INSOMNIA_PREVIEW_READY"],
+              let window = NSApp.windows.first(where: \.isVisible) else { return }
+        window.styleMask = [.borderless]
+        window.hasShadow = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            try? String(window.windowNumber).write(toFile: path, atomically: true, encoding: .utf8)
+        }
+    }
+}
+#endif
+
 @main
 private struct InsomniaApp: App {
     @StateObject private var model = DashboardModel()
@@ -717,7 +735,9 @@ private struct InsomniaApp: App {
 #if DESIGN_PREVIEW
         WindowGroup("Insomnia Design Preview") {
             DashboardView(model: model)
+                .onChange(of: model.refreshedAt) { if $0 != nil { PreviewCapture.ready() } }
         }
+        .windowResizability(.contentSize)
 #else
         MenuBarExtra {
             DashboardView(model: model)

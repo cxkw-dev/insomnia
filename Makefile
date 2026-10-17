@@ -11,7 +11,7 @@
 
 CARGO := cd terminal && cargo
 
-.PHONY: install setup run check test preview macos install-app uninstall-app
+.PHONY: install setup run check test preview screenshots macos install-app uninstall-app
 
 # --- terminal app -----------------------------------------------------------
 
@@ -35,6 +35,10 @@ test:
 
 preview:
 	$(CARGO) run --quiet --example preview 110 46 7
+
+# README images from fixture data (docs/fixtures); needs Google Chrome.
+screenshots:
+	sh docs/screenshots.sh
 
 # --- menu bar app -----------------------------------------------------------
 

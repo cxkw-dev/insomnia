@@ -1,0 +1,13 @@
+hdr|coral|✻ claude
+warn|▸ work account|org · $25 left · active
+bar|coral|monthly spend|87|spent $175 of $200
+ok|  personal|max · 42% used
+bar|coral|5h window|9|91% left · reset in 2h · Sat 2:30 PM
+bar|coral|weekly|42|58% left · reset in 3d · Mon 3:49 AM
+hdr|teal|◎ openai codex
+bad|▸ personal|pro · 96% used · active
+bar|teal|weekly|96|4% left · reset in 4d · Tue 9:00 AM
+warn|  work account|business · 61% used
+bar|teal|monthly credits|61|39% left · billing in 9d · Sun 7:00 PM
+hdr|violet|⧉ copilot
+ok|▸ example-team|biz · unlimited

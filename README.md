@@ -1,135 +1,73 @@
-# ☾ insomnia
+<h1 align="center">☾ insomnia</h1>
 
-Keep your Mac awake, beautifully. insomnia is a `caffeinate` replacement that
-holds IOKit power assertions directly — no sudo and no helper `caffeinate`
-process — wrapped in a night-sky TUI. The kernel lets go the instant insomnia
-exits. While it runs, a twinkling starfield surrounds Night Watch, a live awake
-timer and countdown, and a small dashboard you can teach new tricks.
+<p align="center">
+  Keep your Mac awake, beautifully — a <code>caffeinate</code> replacement with a night-sky
+  terminal dashboard and a menu bar app.
+</p>
 
-**macOS only.** insomnia talks to IOKit directly — that's the whole point,
-and it doesn't pretend to run anywhere else.
+<p align="center">
+  <img src="docs/terminal.png" alt="The insomnia terminal UI: a session timer above an AI usage dashboard, set in a dark starfield" width="860">
+</p>
 
-```text
-·                              ✦
-                                              ☾  I N S O M N I A
+insomnia holds IOKit power assertions directly — no sudo, no helper
+`caffeinate` process — and the kernel lets go the instant it exits. While it
+runs, a quiet starfield surrounds a session timer and a dashboard you can feed
+with any shell command: Docker containers, AI quota, CI, whatever you watch.
 
-  ╭────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-  │                                                                                                        │
-  │   NIGHT WATCH                                                                                ● AWAKE   │
-  │                                                                                                        │
-  │   01:17:43 REMAINING                                                                00:42:17 ELAPSED   │
-  │   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◆────────────────────────────────────────────────────────────  35%   │
-  │                                                                                                        │
-  │   DISPLAY + SYSTEM HELD                                                       RELEASES AUTOMATICALLY   │
-  │   AC POWER · BATTERY 100%                                                                              │
-  │                                                                                                        │
-  │   ──────────────────────────────────────────────────────────────────────────────────────────────────   │
-  │                                                                                                        │
-  │   AI USAGE                                                                          4 NEED ATTENTION   │
-  │                                                                                                        │
-  │   CLAUDE                                                                                               │
-  │     WORK ACCOUNT        ENTERPRISE · $25 LEFT · ACTIVE                                                 │
-  │       ╰ MONTHLY SPEND   ████████████████████▉░░░  87%                                                  │
-  │                         $175 / $200                                                                    │
-  │     PERSONAL ACCOUNT    42% USED                                                                       │
-  │       ╰ 5H WINDOW       ██▏░░░░░░░░░░░░░░░░░░░░░   9%                                                  │
-  │                         RESET IN 2H · TODAY 2:30 PM                                                    │
-  │       ╰ WEEKLY          ██████████▏░░░░░░░░░░░░░  42%                                                  │
-  │                         RESET IN 3D · SUN 3:49 AM                                                      │
-  │       ╰ FABLE WEEKLY    ████████████████████████ 100%                                                  │
-  │                         RESET IN 2D · SAT 11:59 AM                                                     │
-  │                                                                                                        │
-  │   CODEX                                                                                                │
-  │   › PERSONAL ACCOUNT    PRO · 96% USED · ACTIVE                                                        │
-  │       ╰ WEEKLY          ███████████████████████░  96%                                                  │
-  │                         RESET IN 4D · MON 9:00 AM                                                      │
-  │     WORK ACCOUNT        BUSINESS · 95% USED · STALE 1D                                                 │
-  │       ╰ MONTHLY CREDITS ██████████████████████▊░  95%  STALE                                           │
-  │                         BILLING IN 1D · FRI 7:00 PM                                                    │
-  │                                                                                                        │
-  │   COPILOT                                                                                              │
-  │     EXAMPLE TEAM        BIZ · UNLIMITED                                                                │
-  │                                                                                                        │
-  │   1–25 OF 33 · PGUP/PGDN SCROLL                                                                        │
-  │                                                                                                        │
-  ╰────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+- **Keep awake** — display, idle system, lid-closed (on AC), or disks; for a
+  duration or until you quit.
+- **Dashboard** — Docker is built in; anything else is a shell command that
+  prints rows.
+- **AI usage** — an optional card for Claude, Codex, and Copilot quota across
+  all your accounts.
+- **Menu bar app** — the same cards in a native popover, plus a
+  keep-display-awake switch.
 
-                           ↑↓ NAVIGATE   PGUP/PGDN SCROLL   M MOTION:ON   Q RELEASE
-                            .
-```
-
-That's one frame, rendered headlessly in monochrome — the real thing is in
-color, with a sparse, slowly moving sky around a steady dashboard.
-
-The AI usage section in this preview uses synthetic data. The real thing is an
-optional card in [`cards/`](cards/) that reads your own Claude, Codex, and
-Copilot logins — see [AI usage](#ai-usage). insomnia itself never touches
-provider credentials: Docker is the only built-in integration, and everything
-else is a shell command speaking the [card protocol](#the-dashboard).
+**macOS only.** insomnia talks to IOKit directly; that's the whole point.
 
 ## Install
 
-Requires [Rust](https://rustup.rs) and a Mac.
+Needs a Mac and [Rust](https://rustup.rs).
 
 ```sh
 git clone https://github.com/cxkw-dev/insomnia && cd insomnia
-make install   # builds the `insomnia` binary into ~/.cargo/bin
+make install   # builds `insomnia` into ~/.cargo/bin
 make setup     # optional: starter config + the AI usage card
 insomnia
 ```
 
-`make setup` writes `~/.config/insomnia/config.toml`,
-`~/.config/insomnia/ai-usage.sh`, and an empty account list. It never
-overwrites a file you already have. Skip it and insomnia runs with defaults —
-no config file is needed at all.
+`make setup` writes `~/.config/insomnia/config.toml`, the AI usage script,
+and an empty account list. It never overwrites a file you already have. Skip
+it and insomnia runs on defaults.
 
-Already installed from this checkout? Rebuild the copy on your `PATH`, quit the
-running app with `q`, and launch it again:
-
-```sh
-make install
-insomnia
-```
-
-Quit with `q`, `esc`, or `ctrl-c` — the assertions release instantly and your
-Mac goes back to sleeping on its own schedule.
+Quit with `q`, `esc`, or `ctrl-c`; the assertions release instantly. To pick
+up code changes later, run `make install` again — the `insomnia` on your PATH
+is a copy, not the working tree.
 
 ### Menu bar app
 
-The native macOS app lives in [`macos/`](macos/). It keeps the CLI intact and
-reads the same `~/.config/insomnia/config.toml` cards through a bundled Rust
-helper. The popover groups AI accounts into **Business AI** and **Personal**
-(see [grouping accounts](#grouping-accounts)). Each provider's mark and quota
-meters use its brand color, with reset details below. It refreshes every 30
-seconds and has a manual refresh button.
+<img src="docs/menubar.png" alt="The Insomnia menu bar popover, grouping AI accounts into Business AI and Personal with quota meters" width="330" align="right">
 
-Install it with the macOS Command Line Tools present
-(`xcode-select --install`):
+A native SwiftUI popover that reads the same config and cards through a
+bundled Rust helper. AI accounts are grouped into **Business AI** and
+**Personal** ([you choose which](#grouping-accounts)), each provider in its
+brand color with reset times under every meter. Other cards show below. It
+refreshes every 30 seconds.
+
+The switch beside the wordmark keeps the display awake; the crescent turns
+amber while it's on. Quitting the app, or turning the switch off, releases it.
+
+Needs the Command Line Tools (`xcode-select --install`):
 
 ```sh
-make install-app     # builds, copies to /Applications (or ~/Applications), starts at login
-make uninstall-app   # removes the app and its login item
-make macos           # just build dist/Insomnia.app without installing
+make install-app     # build, copy to /Applications, start at login
+make uninstall-app   # remove it and its login item
 ```
 
-Click the moon in the menu bar to see usage and use the switch beside the
-Insomnia wordmark to keep the display awake. The switch starts off when the
-app opens. While on, the app holds a macOS display sleep assertion; turning it
-off or quitting releases the assertion. The crescent turns amber and glows
-while awake. Closing the popover leaves the app running in the menu bar.
+Like the CLI, the installed app is a copy: rerun `make install-app` after
+pulling changes.
 
-Like the CLI, the installed app is a copy: code changes do nothing until you
-run `make install-app` again.
-
-The popover takes its high-contrast typography, black canvas, thin dividers,
-and restrained glow from [Vercel's homepage](https://vercel.com/home). It uses
-Geist type, thin quota meters, and compact provider marks.
-The marks and their sources are documented in [`macos/Icons/`](macos/Icons/).
-
-The app uses your existing card commands, including the AI usage card if
-you've run `make setup`. With no cards configured, it says so and points at the
-config file. Credentials stay with the local commands; the app only reads their
-rendered rows.
+<br clear="right">
 
 ## Usage
 
@@ -148,124 +86,45 @@ insomnia -q -t 1h   # no TUI, just hold quietly in the foreground
 | `-s` | prevent sleep entirely, even lid-closed (AC power only) |
 | `-m` | keep disks from idle-sleeping |
 | `-t <time>`, `--for <time>` | stay awake for a duration, then release |
-| `-q`, `--quiet` | skip the art, hold quietly |
+| `-q`, `--quiet` | skip the UI, hold quietly |
 | `--config <path>` | config file (default `~/.config/insomnia/config.toml`) |
-| `-h`, `--help` | help |
-| `-V`, `--version` | version |
+| `-h`, `--help` / `-V`, `--version` | help / version |
 
-With no flags, insomnia runs as `-d -i`: display and system stay awake.
-Durations read the way you'd say them: a bare number is seconds (matching
-`caffeinate -t`), or use units — `300`, `90s`, `45m`, `2h`, `1h30m`.
-
-## The dashboard
-
-The default layout is one quiet frame. `night watch` stays anchored above the
-dashboard, with remaining time first, elapsed time beside it, and power details
-underneath. Without a duration, it shows elapsed time and `until you release`.
-The wordmark, labels, and displayed card text use uppercase; commands and source
-data are unchanged.
-
-Every provider has its own color, taken from the card's existing header and
-meter accents. Accounts, all quota windows, reset times, and container statuses
-are displayed immediately. Reset and billing details appear beneath each usage
-meter, with uppercase days and 12-hour AM/PM times. Percentages use amber and red for high usage;
-provider labels and gauges keep their identifying colors. Source-marked stale
-data keeps its bar and carries an explicit stale label. A 100% value fills
-the entire gauge. Account values, usage bars, reset details, and container
-indicators share one aligned column. Usage bars stay compact at up to 24 cells,
-with equal space reserved for percentages and stale status.
-
-Docker containers use subtle single-character indicators: a softly breathing
-muted green `●` for running, amber `Ⅱ` for paused, a dim `○` for stopped,
-a softly breathing amber `◌` for restarting, and a red `×` for errors. Uptime,
-health-check results, and exit details remain
-visible. The animation represents the last polled state, not CPU activity.
+Durations read the way you'd say them: `300` (seconds, like `caffeinate -t`),
+`90s`, `45m`, `2h`, `1h30m`.
 
 | key | action |
 |-----|--------|
-| `↑` / `↓`, `k` / `j` | select a row |
+| `↑` `↓` / `k` `j` | select a row |
 | `page up` / `page down` | scroll the dashboard |
-| `m` | toggle sky and container animation; data and timers keep updating |
+| `m` | pause or resume the sky's motion |
 | `q`, `esc`, `ctrl-c` | release and quit |
 
-Selection follows the same source row across refreshes. Narrow terminals wrap
-quota details; short terminals scroll the dashboard while keeping the session
-above it. A truly tiny terminal uses compact mode.
+## Dashboard
 
-**Docker is built in.** Every container stays visible, including stopped ones.
-Rows show the state (running, stopped, paused, or restarting), uptime or exit
-details, and health-check results when available. Cleanly stopped containers
-are quiet; failures and unhealthy containers need attention. When the daemon
-is unavailable, the section is absent. To turn it off:
+The session timer stays pinned at the top; the dashboard scrolls beneath it.
+Small terminals wrap details and scroll, and a truly tiny one falls back to a
+compact view.
+
+### Docker
+
+Built in, and on whenever the Docker daemon answers. Every container is
+listed — running, paused, restarting, stopped — with uptime, health checks, and
+exit details. Failures and unhealthy containers are flagged; clean stops stay
+quiet. To turn it off:
 
 ```toml
 [docker]
 enabled = false
 ```
 
-**Custom cards** are `[[card]]` blocks in `~/.config/insomnia/config.toml`
-(or `$XDG_CONFIG_HOME/insomnia/config.toml`, or wherever `--config` points).
-Each one runs a shell command on a timer and turns its stdout into rows:
+### Custom cards
 
-| field | required | default | meaning |
-|-------|----------|---------|---------|
-| `title` | yes | — | the card's name |
-| `command` | yes | — | run via `sh -c` every `interval` seconds |
-| `interval` | no | `10` | seconds between runs (minimum 2) |
-| `glyph` | no | `◆` | title glyph in the optional separate-card layout |
-| `accent` | no | `violet` | separate-card accent: `violet` `pink` `sky` `blue` `emerald` `gold` `red` `slate` `coral` `teal` |
-| `side` | no | `right` | `left` places separate cards left of the session when space permits |
-
-The row protocol: **each line of stdout is one source row.** Plain text remains
-readable as uppercase text. `ok|name|detail`, `warn|name|detail`,
-`bad|name|detail`, and `off|name|detail` describe healthy, warning, failed, and
-dormant items. The detail is optional. `hdr|accent|text` starts a group, such
-as a provider or environment. `bar|accent|label|percent|detail` supplies a
-0–100 utilization meter; consecutive meters belong to the preceding health
-row. Its optional detail is useful for reset times.
-
-The focused layout shows every meter and detail immediately. Standalone meters
-and plain-text cards also work. Provider labels and gauges use their configured
-accents; amber and red values mark attention. A command contributes at most 32
-source rows and its card only appears when the command succeeds with output.
-
-Card commands are trusted local code and run through `sh -c`. Keep tokens and
-secrets out of the TOML file; prefer authenticated CLIs, Keychain-backed tools,
-or environment variables that are already available to the command.
-
-The focused layout is the default (`combined = true`). The previous separate
-cards remain available with `combined = false`: they sit beside the session
-on wide terminals, stack below it on narrow ones, and fold when space runs out.
-Row navigation and scrolling belong to the focused layout.
+A card is a shell command on a timer. Each line it prints becomes a row:
 
 ```toml
-[dashboard]
-combined = false # optional separate-card layout
-```
-
-Some cards worth stealing:
-
-```toml
-# Today's todos, from a local app's API.
-[[card]]
-title = "todos"
-glyph = "⌖"
-accent = "violet"
-command = 'curl -sf localhost:3000/api/todos | jq -r ".[].title"'
-
-# Pull requests waiting on you.
-[[card]]
-title = "pull requests"
-glyph = "⇄"
-accent = "sky"
-interval = 120
-command = 'gh search prs --state=open --review-requested=@me --json title --jq ".[].title"'
-
-# A health check, using the row protocol.
 [[card]]
 title = "services"
-glyph = "♥"
-accent = "emerald"
 interval = 30
 command = '''
 for url in localhost:3000 localhost:8080; do
@@ -274,76 +133,76 @@ done
 '''
 ```
 
-And a complete config, every section together (the annotated starting point
-is [`cards/config.example.toml`](cards/config.example.toml)):
+| field | default | meaning |
+|-------|---------|---------|
+| `title` | required | the section's name |
+| `command` | required | run with `sh -c` every `interval` seconds |
+| `interval` | `10` | seconds between runs (minimum 2) |
+| `glyph`, `accent`, `side` | — | only used with `[dashboard] combined = false` (below) |
+
+Rows use a tiny pipe-separated protocol. Anything else prints as plain text.
+
+| line | renders as |
+|------|------------|
+| `ok\|name\|detail` | a healthy item (`warn`, `bad`, and `off` for the other states; detail optional) |
+| `hdr\|accent\|text` | a section header, e.g. a provider or environment |
+| `bar\|accent\|label\|percent\|detail` | a 0–100 meter, attached to the row above it |
+
+Accents: `violet` `pink` `sky` `blue` `emerald` `gold` `red` `slate` `coral`
+`teal`. A card shows at most 32 rows, and only once its command succeeds with
+output.
+
+Card commands are your own code running as you. Keep tokens out of the TOML;
+prefer authenticated CLIs (`gh`, `docker`), the Keychain, or your environment.
+
+More to steal:
 
 ```toml
-# ~/.config/insomnia/config.toml
-
-[docker]
-enabled = true    # the default; false retires the docker card
-
-[sky]
-comets = false    # a calmer night — shooting stars only
-
-[dashboard]
-combined = true   # the default single frame
-
-[accounts]        # menu bar grouping for AI accounts
-personal = ["jane"]
-
 [[card]]
 title = "pull requests"
-glyph = "⇄"
-accent = "sky"
 interval = 120
 command = 'gh search prs --state=open --review-requested=@me --json title --jq ".[].title"'
+
+[[card]]
+title = "todos"
+command = 'curl -sf localhost:3000/api/todos | jq -r ".[].title"'
 ```
 
-No config file is needed at all — everything above is optional.
+Prefer separate boxes beside the session instead of one frame? Set
+`[dashboard] combined = false`; each card then uses its `glyph`, `accent`, and
+`side` (`left` or `right`).
 
 ## AI usage
 
-[`cards/ai-usage.sh`](cards/ai-usage.sh) is an optional card that shows quota
-windows, reset times, spend, and a per-hour trend for:
+[`cards/ai-usage.sh`](cards/ai-usage.sh) is an optional card showing quota
+windows, reset times, spend, and an hourly trend:
 
-| service | where accounts come from | needs |
-|---------|--------------------------|-------|
-| Claude | Claude Code's login (Keychain) and Claude Desktop's active session | `jq`, `curl` |
-| Codex | `~/.codex/auth.json`, shared by the Codex CLI and Codex Desktop | `jq`, `curl` |
+| service | accounts come from | needs |
+|---------|--------------------|-------|
+| Claude | Claude Code's login and Claude Desktop's active session | `jq`, `curl` |
+| Codex | `~/.codex/auth.json`, shared by the Codex CLI and app | `jq`, `curl` |
 | Copilot | every account in `gh auth status` | `jq`, `curl`, [`gh`](https://cli.github.com) |
 
-`make setup` installs it and adds this card to your config:
-
-```toml
-[[card]]
-title = "ai usage"
-glyph = "✦"
-accent = "slate"
-interval = 30
-command = '"${XDG_CONFIG_HOME:-$HOME/.config}/insomnia/ai-usage.sh" all'
-```
-
-Services you aren't logged into are left out. Run it by hand to see what the
-card will show: `~/.config/insomnia/ai-usage.sh all`.
+`make setup` installs it as `~/.config/insomnia/ai-usage.sh` and adds the
+card. Services you aren't logged into are skipped. To preview what it will
+show, run `~/.config/insomnia/ai-usage.sh all`.
 
 ### Adding accounts
 
-**Whatever you're logged into shows up on its own,** marked `▸`. For more:
+Whatever you're logged into right now appears on its own, marked `▸`.
 
-- **Copilot:** `gh auth login` each GitHub account. All of them appear.
-- **A second Claude or Codex account:** log into it (`/login` inside Claude
-  Code, or `codex login`), save a snapshot under a name you choose, then log
-  back into your usual one:
+- **Copilot** — `gh auth login` each GitHub account; all of them appear.
+- **Another Claude or Codex account** — log into it (`/login` in Claude Code,
+  or `codex login`), save it under a name, then log back into your usual one:
 
   ```sh
   ~/.config/insomnia/ai-usage.sh capture claude work
   ~/.config/insomnia/ai-usage.sh capture codex work
   ```
 
-- **Always list an account,** even while it's logged out everywhere, by
-  naming it in `~/.config/insomnia/ai-usage/accounts.conf`. It shows as a dim
-  `not logged in` row until a login or capture with that name exists:
+- **Always list an account**, even while it's logged out, in
+  `~/.config/insomnia/ai-usage/accounts.conf`. It shows as `not logged in`
+  until a login or capture with that name exists:
 
   ```text
   claude work
@@ -351,18 +210,17 @@ card will show: `~/.config/insomnia/ai-usage.sh all`.
   copilot my-github-handle
   ```
 
-OAuth refresh tokens rotate. A captured account keeps working while it's
-logged in somewhere the card can see. Once it's logged out everywhere, its
-snapshot eventually expires, and the row says `stale 2d` instead of showing
-old numbers as current. Capture it again to revive it.
+Login tokens rotate. A captured account keeps refreshing while it's logged
+in somewhere the card can see; once it's logged out everywhere it eventually
+goes `stale`, and the row says so rather than showing old numbers as current.
+Capture it again to revive it.
 
 ### Grouping accounts
 
-The menu bar app sorts AI accounts into **Business AI** and **Personal**.
-Unlisted accounts are grouped by plan: org, business, enterprise, and team plans
-go under Business AI, and everything else goes under Personal. Name accounts
-in `[accounts]` to override that. Each entry is a case-insensitive piece of
-the account name the card prints:
+The menu bar app files accounts under **Business AI** or **Personal** by plan:
+org, business, enterprise, and team plans are business, the rest personal.
+Override that by naming accounts — any case-insensitive part of the name the
+card prints:
 
 ```toml
 [accounts]
@@ -370,90 +228,84 @@ personal = ["jane", "side-project"]
 business = ["acme"]
 ```
 
-### Where your data lives
+### Privacy
 
-Everything stays in `~/.config/insomnia/ai-usage/` (mode 700): captured
-logins, a short response cache, and trend samples. Nothing goes in the repo or
-the TOML file. The script only talks to the providers' own usage endpoints.
-These are the same undocumented endpoints their apps use for usage screens,
-so they can change without notice. It reads Claude Desktop's session the way
-the desktop app stores it, which means macOS may ask once for Keychain access
-to "Claude Safe Storage".
+Everything stays on your Mac, in `~/.config/insomnia/ai-usage/` (mode 700):
+captured logins, a short response cache, and trend samples. The script talks
+only to each provider's own usage endpoint — the same undocumented ones their
+apps use, so they can change without notice. Reading Claude Desktop's session
+may prompt once for Keychain access to "Claude Safe Storage".
+
+## Configuration
+
+Everything is optional; no file is needed. The annotated starting point is
+[`cards/config.example.toml`](cards/config.example.toml).
+
+```toml
+# ~/.config/insomnia/config.toml (or $XDG_CONFIG_HOME/insomnia/config.toml)
+
+[docker]
+enabled = true          # false hides containers
+
+[sky]
+motion = true           # false starts with a still sky (`m` toggles)
+comets = true           # flyers: comets, shooting_stars
+shooting_stars = true
+
+[dashboard]
+combined = true         # one frame; false for separate boxes
+
+[accounts]              # menu bar grouping for AI accounts
+personal = ["jane"]
+
+[[card]]                # as many as you like
+title = "ai usage"
+interval = 30
+command = '"$HOME/.config/insomnia/ai-usage.sh" all'
+```
+
+A misspelled section, flyer, or accent is an error that lists the valid names.
 
 ## The sky
 
-Sparse stars and occasional flyers stay around the edges of the dashboard.
-Status indicators and the wordmark remain steady. Press `m` to freeze the sky,
-or start with motion off in your config:
+Sparse stars, three comets on long orbits, and the occasional shooting star
+drift around the edges; the dashboard itself stays still. Everything moves
+from a tick counter and a position hash — no state — so any frame can be
+rendered headlessly, which is how the screenshot above is made.
 
-```toml
-[sky]
-motion = false
-```
-
-The individual flyer switches still apply when motion is on:
-
-| flyer | what it does |
-|-------|--------------|
-| `comets` | three of them — two ice-blue, one golden — long smooth tails on long offset orbits |
-| `shooting_stars` | brief silver streaks that dart across and are gone; each pass starts somewhere new |
-
-Ground either from the `[sky]` table:
-
-```toml
-[sky]
-shooting_stars = false
-```
-
-Unlisted flyers stay on, and a misspelled name gets an error that lists what
-the sky holds.
-
-## Add your own flyer
-
-The sky is a registry, and it's built to be extended — the full guide lives
-in a doc comment at the top of [`terminal/src/sky.rs`](terminal/src/sky.rs). Two steps:
-
-1. **Write a draw function** in `sky.rs` that positions itself from
-   `ctx.tick` and draws with `pixel::set_px` — one call per pixel, half-block
-   resolution, out-of-bounds pixels clipped for free.
-2. **Add one `Flyer` entry** to the `FLYERS` list.
-
-That's it — it flies, and the `[sky]` config toggle for it appears
-automatically. Pull requests are very welcome. The sky has room.
+Adding a flyer takes a draw function and one entry in `sky::FLYERS`; its
+`[sky]` toggle appears automatically. The guide is at the top of
+[`terminal/src/sky.rs`](terminal/src/sky.rs). Pull requests welcome — the sky
+has room.
 
 ## How it works
 
-insomnia calls the same IOKit API `caffeinate` uses —
-`IOPMAssertionCreateWithName` — to hold assertions like
-`PreventUserIdleDisplaySleep` and `PreventUserIdleSystemSleep` directly from
-the process. No sudo and no separate keep-awake process. The kernel ties
-assertions to their process, so they release the moment insomnia exits,
-however it exits — even SIGKILL can't leave your display pinned awake. See for
-yourself while it's running:
+insomnia calls `IOPMAssertionCreateWithName`, the API `caffeinate` uses, to
+hold assertions like `PreventUserIdleDisplaySleep` from its own process. The
+kernel ties assertions to the process, so they release the moment insomnia
+exits — even on `SIGKILL`. Check while it runs:
 
 ```sh
 pmset -g assertions | grep insomnia
 ```
 
-Everything slow — `pmset`, `docker`, your card commands — runs on background
-threads, one per source, streaming updates to the renderer. A hanging command
-only ever delays its own card; the animation never stutters.
+Slow work — `pmset`, `docker`, card commands — runs on background threads, one
+per source, streaming to the renderer. A hanging command only delays its own
+rows; the animation never stutters.
 
 ## Development
 
 ```sh
-make run       # the real thing, from the working tree
-make check     # fmt + clippy + tests
-make preview   # one headless frame (cargo run --example preview <w> <h> <tick>)
-make install   # rebuild and replace the installed binary
-make setup     # starter config + ai usage card (never overwrites)
-
-# inspect the actual terminal cells in color using fixture data
-cargo run --quiet --manifest-path terminal/Cargo.toml --example preview 110 46 7 --html > preview.html
+make run           # run from the working tree
+make check         # fmt + clippy + tests, before committing
+make preview       # one headless text frame
+make screenshots   # regenerate docs/*.png from fixture data (needs Chrome)
 ```
 
-The `insomnia` on your PATH is the installed copy — code changes don't reach
-it until `make install` (or `cargo install --path terminal`) rebuilds it.
+The Rust crate is in [`terminal/`](terminal/), the menu bar app in
+[`macos/`](macos/), and the optional cards in [`cards/`](cards/). Screenshots
+use only the fixtures in [`docs/fixtures/`](docs/fixtures/), never live
+accounts.
 
 ## License
 

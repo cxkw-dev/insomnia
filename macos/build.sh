@@ -3,13 +3,20 @@ set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 app="$repo_root/dist/Insomnia.app"
+# DESIGN_PREVIEW=1 builds a windowed copy for screenshots (docs/screenshots.sh).
+swift_flags=""
+if [ "${DESIGN_PREVIEW:-0}" = 1 ]; then
+  app="$repo_root/dist/Insomnia Preview.app"
+  swift_flags="-D DESIGN_PREVIEW"
+fi
 contents="$app/Contents"
 arch=$(uname -m)
 
 cd "$repo_root"
 cargo build --release --manifest-path "$repo_root/terminal/Cargo.toml" --bin insomnia-snapshot
 mkdir -p "$contents/MacOS" "$contents/Resources/Fonts" "$contents/Resources/Icons"
-swiftc -O -swift-version 6 -parse-as-library -target "${arch}-apple-macosx13.0" \
+# shellcheck disable=SC2086 # swift_flags is deliberately word-split
+swiftc -O -swift-version 6 -parse-as-library -target "${arch}-apple-macosx13.0" $swift_flags \
   "$repo_root/macos/Sources/InsomniaApp.swift" -o "$contents/MacOS/Insomnia"
 cp "$repo_root/terminal/target/release/insomnia-snapshot" "$contents/MacOS/insomnia-snapshot"
 cp "$repo_root/macos/Fonts/Geist.ttf" "$contents/Resources/Fonts/Geist.ttf"

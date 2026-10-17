@@ -17,6 +17,7 @@ make run       # run from the working tree
 make check     # fmt --check + clippy -D warnings + tests — run before committing
 make test      # cargo test
 make preview   # one headless frame (cargo run --example preview <w> <h> <tick>)
+make screenshots   # regenerate docs/terminal.png + docs/menubar.png from fixtures
 make install   # rebuild and replace the installed binary
 make macos     # build dist/Insomnia.app with the bundled snapshot helper
 make install-app   # build, copy to /Applications (or ~/Applications), login item, relaunch
@@ -38,9 +39,10 @@ showing up", this is almost always why. `dist/` is only build output; nothing
 runs from it.
 
 **Seeing a change:** `make preview` renders one frame headlessly to stdout —
-use it to eyeball layout work without a live terminal. The README's hero
-frame is that exact output (`make preview`); if a
-change alters the frame's look, regenerate the README block from it.
+use it to eyeball layout work without a live terminal. The README's images
+come from `make screenshots`: `docs/terminal.png` is the preview example's
+`--html` export, and `docs/menubar.png` is a `DESIGN_PREVIEW` build of the app
+fed `docs/fixtures/`. If a change alters either look, regenerate them.
 
 ## Layout
 
@@ -54,6 +56,8 @@ One repo, two apps that share `~/.config/insomnia/config.toml`:
 - `cards/` — the optional `ai-usage.sh` card, `config.example.toml`, an
   `accounts.conf` example, and `setup.sh` (`make setup`). A test parses
   `config.example.toml`, so keep it valid.
+- `docs/` — README images, `screenshots.sh`, `frame.swift` (rounded corners
+  and shadow), and the fixture rows the menu bar shot uses.
 - `dist/` — gitignored output of `make macos`.
 
 The root holds only the Makefile, README, LICENSE, and this file. Module
