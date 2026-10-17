@@ -1,9 +1,12 @@
 # ~/.config/insomnia/ai-usage/accounts.conf
-# Accounts the ai usage card should always list, one per line:
-#   <service> <name>        service: claude | codex | copilot
-# An entry with no live login or capture shows as a dim "not logged in" row;
-# once a login or capture with the same name exists, the live row takes over.
+# One account per line:
+#   <service> <name>          always list it (service: claude | codex | copilot)
+#   <service> <name> hidden   turn it off: never fetched or shown
+# A listed account with no live login or capture shows as a dim "not logged
+# in" row until a login or capture with that name exists. Hiding deletes
+# nothing — remove the word "hidden" to bring the account back.
 #
 # claude jane
 # codex jane
 # copilot jane-doe
+# claude old-job hidden

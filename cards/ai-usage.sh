@@ -19,7 +19,8 @@
 # `gh auth login` account). To keep a second Claude or Codex account visible,
 # log into it, run `ai-usage.sh capture <claude|codex> <name>`, then log back
 # into your usual one. To list an account even while it isn't logged in,
-# add `<service> <name>` to ~/.config/insomnia/ai-usage/accounts.conf.
+# add `<service> <name>` to ~/.config/insomnia/ai-usage/accounts.conf; to turn
+# an account off without deleting anything, add `<service> <name> hidden`.
 #
 # These are the same undocumented endpoints the providers' own apps use for
 # their usage screens, so they can change without notice.
@@ -125,10 +126,6 @@ when_full() { # when_full <epoch> -> "Sun Sep 6 21:51 CDT"
   else
     date -r "$1" '+%a %b %-d %Y %H:%M %Z' 2>/dev/null
   fi
-}
-
-trunc() { # trunc <name> — cap at the 19 chars the card's name column holds
-  if [ ${#1} -gt 19 ]; then printf '%.18s…' "$1"; else printf '%s' "$1"; fi
 }
 
 cache_fresh() { # cache_fresh <key> <ttl-seconds>
@@ -281,15 +278,27 @@ usage_rows() {
   done
 }
 
+# is_hidden <service> <name> — accounts.conf turns the account off with a
+# third word, `<service> <name> hidden`. A hidden account is never fetched
+# or shown; delete the word to bring it back. Nothing is deleted.
+is_hidden() {
+  local s n flag
+  [ -f "$DIR/accounts.conf" ] || return 1
+  while read -r s n flag _; do
+    [ "$s" = "$1" ] && [ "$n" = "$2" ] && [ "$flag" = hidden ] && return 0
+  done < "$DIR/accounts.conf"
+  return 1
+}
+
 # roster_rows <service> <shown names...> — accounts.conf entries with no
 # matching live row appear dormant, so known accounts are never invisible.
 roster_rows() {
-  local svc s n
+  local svc s n flag
   svc=$1; shift
   [ -f "$DIR/accounts.conf" ] || return 0
-  while read -r s n _; do
-    [ "$s" = "$svc" ] || continue
-    case " $* " in *" $n "*) ;; *) echo "off|  $(trunc "$n")|not logged in";; esac
+  while read -r s n flag _; do
+    [ "$s" = "$svc" ] && [ "$flag" != hidden ] || continue
+    case " $* " in *" $n "*) ;; *) echo "off|  $n|not logged in";; esac
   done < "$DIR/accounts.conf"
 }
 
@@ -426,6 +435,7 @@ codex_rows() {
     name=$(basename "$f" .json)
     id=$(jq -r '.tokens.account_id // empty' "$f")
     seen_ids="$seen_ids $id"; names="$names $name"
+    is_hidden codex "$name" && continue
     # Refresh tokens rotate: the moment the codex CLI refreshes, the copy
     # captured here is invalidated and this account freezes on its last good
     # reading. So for whichever account is logged in now, read the live
@@ -435,7 +445,7 @@ codex_rows() {
     [ -n "$cur_id" ] && [ "$id" = "$cur_id" ] && {
       m="▸"; src=$cur; ttl=$LIVE_TTL; retry=$LIVE_RETRY;
     }
-    usage_rows "$m $(trunc "$name")" teal \
+    usage_rows "$m $name" teal \
       "$(fetch "codex-$name" "$ttl" "$retry" codex_fetch "$src" | codex_render)" "$(staleness "codex-$name")" "codex-$name"
     if [ "$src" = "$cur" ]; then
       mirror="$f.tmp.$$"
@@ -453,7 +463,8 @@ codex_rows() {
     [ -n "$out" ] || break
     name=$(printf '%s\n' "$out" | jq -r '.email // "" | split("@")[0]')
     names="$names ${name:-current}"
-    usage_rows "▸ $(trunc "${name:-current}")" teal \
+    is_hidden codex "${name:-current}" && break
+    usage_rows "▸ ${name:-current}" teal \
       "$(printf '%s\n' "$out" | codex_render)" "$(staleness "codex-current-$cache_account")" "codex-current-$cache_account"
     break
   done
@@ -911,6 +922,7 @@ claude_rows() {
     account=$(jq -r '.account_uuid // empty' "$f")
     [ -n "$legacy_desktop" ] && [ "$f" = "$legacy_desktop" ] && account=$desktop_account
     seen="$seen $em"; seen_accounts="$seen_accounts $account"; names="$names $name"
+    is_hidden claude "$name" && continue
     # Same rotation trap as codex: once Claude Code refreshes, the captured
     # copy is dead. Read the keychain for the account that's logged in now,
     # then re-snapshot it so this file keeps up.
@@ -929,7 +941,7 @@ claude_rows() {
     else
       out=$(fetch "claude-$name" "$SNAPSHOT_TTL" "$SNAPSHOT_RETRY" claude_fetch_file "$f")
     fi
-    usage_rows "$m $(trunc "$name")" coral \
+    usage_rows "$m $name" coral \
       "$(printf '%s\n' "$out" | claude_render)" "$(staleness "claude-$name")" "claude-$name"
     [ "$mirror" = 1 ] && claude_snapshot "$f"
   done
@@ -938,15 +950,17 @@ claude_rows() {
       case " $seen " in *" $cur_email "*) break;; esac
     fi
     name=${cur_email%%@*}; name=${name:-current}
+    is_hidden claude "$name" && break
     cache_account=$(printf '%s' "${cur_email:-current}" | tr -c '[:alnum:]._-' '-')
     out=$(fetch "claude-current-$cache_account" "$LIVE_TTL" "$LIVE_RETRY" claude_fetch_current)
     [ -n "$out" ] || break
     names="$names $name"
-    usage_rows "▸ $(trunc "$name")" coral \
+    usage_rows "▸ $name" coral \
       "$(printf '%s\n' "$out" | claude_render)" "$(staleness "claude-current-$cache_account")" "claude-current-$cache_account"
     break
   done
-  if [ -n "$desktop_account" ] && [ "$desktop_account" != "$cur_account" ]; then
+  if [ -n "$desktop_account" ] && [ "$desktop_account" != "$cur_account" ] \
+    && ! is_hidden claude desktop; then
     case " $seen_accounts " in
       *" $desktop_account "*) ;;
       *)
@@ -995,10 +1009,11 @@ copilot_rows() {
   while read -r u act; do
     [ -n "$u" ] || continue
     names="$names $u"
+    is_hidden copilot "$u" && continue
     m=" "; [ "$act" = "true" ] && m="▸"
     out=$(fetch "copilot-$u" 600 "$SNAPSHOT_RETRY" copilot_fetch "$u")
     [ -n "$out" ] || continue
-    printf '%s\n' "$out" | jq -r --arg n "$m $(trunc "$u")" --arg s "$(staleness "copilot-$u")" '
+    printf '%s\n' "$out" | jq -r --arg n "$m $u" --arg s "$(staleness "copilot-$u")" '
       def clampPct: if . > 100 then 100 elif . < 0 then 0 else . end;
       def pctused(x): ((100 - (x.percent_remaining // 100)) | round | clampPct);
       ({business: "biz", enterprise: "ent", individual: "ind"}[.copilot_plan] // .copilot_plan // "?") as $plan
