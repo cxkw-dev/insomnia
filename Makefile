@@ -25,10 +25,17 @@ setup:
 run:
 	$(CARGO) run
 
+SWIFTC := swiftc -typecheck -swift-version 6 -parse-as-library \
+	-target $(shell uname -m)-apple-macosx13.0 macos/Sources/*.swift
+
 check:
 	$(CARGO) fmt --check
 	$(CARGO) clippy --all-targets -- -D warnings
 	$(CARGO) test --quiet
+	$(SWIFTC)
+	$(SWIFTC) -D DESIGN_PREVIEW
+	bash -n cards/ai-usage.sh
+	for f in cards/setup.sh macos/*.sh docs/screenshots.sh; do sh -n "$$f" || exit 1; done
 
 test:
 	$(CARGO) test
