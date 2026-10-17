@@ -17,6 +17,24 @@ enum AIProvider {
         }
     }
 
+    /// The service name ai-usage.sh and accounts.conf use.
+    init?(service: String) {
+        switch service {
+        case "claude": self = .claude
+        case "codex": self = .codex
+        case "copilot": self = .copilot
+        default: return nil
+        }
+    }
+
+    var service: String {
+        switch self {
+        case .claude: "claude"
+        case .codex: "codex"
+        case .copilot: "copilot"
+        }
+    }
+
     var label: String {
         switch self {
         case .claude: "Claude"

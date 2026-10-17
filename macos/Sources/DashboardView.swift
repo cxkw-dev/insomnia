@@ -21,24 +21,11 @@ struct DashboardView: View {
             }
             .padding(.bottom, 11)
 
-            VStack(alignment: .leading, spacing: 18) {
-                if !model.hasCards && model.refreshError == nil {
-                    Text("Add an AI usage card to ~/.config/insomnia/config.toml to see usage here.")
-                        .font(Typography.sans(13))
-                        .foregroundStyle(Appearance.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                ForEach(AccountCategory.allCases, id: \.self) { category in
-                    let accounts = model.content.accounts(in: category)
-                    if !accounts.isEmpty {
-                        AccountSection(category: category, accounts: accounts)
-                    }
-                }
-                ForEach(model.content.cards) { card in
-                    CardView(card: card)
-                }
+            if model.isEditingAccounts {
+                AccountsEditor(model: model)
+            } else {
+                dashboard
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
             ForEach([model.assertionError, model.refreshError].compactMap { $0 }, id: \.self) { message in
                 Text(message)
@@ -49,13 +36,23 @@ struct DashboardView: View {
             }
 
             Hairline().padding(.top, 11)
-            HStack {
+            HStack(spacing: 14) {
                 Button {
                     model.refresh()
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(model.isLoading)
+                Button {
+                    model.isEditingAccounts.toggle()
+                } label: {
+                    if model.isEditingAccounts {
+                        Label("Done", systemImage: "checkmark")
+                    } else {
+                        Label("Accounts", systemImage: "eye")
+                    }
+                }
+                .help("Choose which AI accounts Insomnia shows")
                 Spacer()
                 if model.isLoading { ProgressView().controlSize(.mini) }
                 if let refreshedAt = model.refreshedAt {
@@ -76,6 +73,88 @@ struct DashboardView: View {
         .background(Appearance.background)
         .preferredColorScheme(.dark)
         .onAppear { model.refreshIfStale() }
+    }
+
+    private var dashboard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if !model.hasCards && model.refreshError == nil {
+                Text("Add an AI usage card to ~/.config/insomnia/config.toml to see usage here.")
+                    .font(Typography.sans(13))
+                    .foregroundStyle(Appearance.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            ForEach(AccountCategory.allCases, id: \.self) { category in
+                let accounts = model.content.accounts(in: category)
+                if !accounts.isEmpty {
+                    AccountSection(category: category, accounts: accounts)
+                }
+            }
+            ForEach(model.content.cards) { card in
+                CardView(card: card)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Every AI account with a switch: on shows it, off writes `hidden` to
+/// accounts.conf, so the usage script stops fetching it and both apps stop
+/// showing it.
+private struct AccountsEditor: View {
+    @ObservedObject var model: DashboardModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Accounts")
+                    .font(Typography.sans(13, weight: .semibold))
+                Text("Hidden accounts aren't fetched or shown, here or in the terminal.")
+                    .caption()
+            }
+            if model.content.accounts.isEmpty && model.hiddenAccounts.isEmpty {
+                Text("No AI accounts yet. Add the ai usage card with `make setup`.")
+                    .font(Typography.sans(12))
+                    .foregroundStyle(Appearance.muted)
+            }
+            ForEach(model.content.accounts) { account in
+                row(provider: account.provider, name: account.name, visible: true)
+            }
+            ForEach(model.hiddenAccounts) { entry in
+                if let provider = entry.provider {
+                    row(provider: provider, name: entry.name, visible: false)
+                }
+            }
+            Text(AccountVisibility.url.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                .font(Typography.mono(10))
+                .foregroundStyle(Appearance.quiet)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.top, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { Hairline() }
+    }
+
+    private func row(provider: AIProvider, name: String, visible: Bool) -> some View {
+        HStack(spacing: 8) {
+            ProviderMark(provider: provider)
+            Text(provider.label)
+                .font(Typography.sans(12, weight: .medium))
+            Spacer(minLength: 8)
+            Text(name)
+                .font(Typography.sans(11))
+                .foregroundStyle(Appearance.muted)
+                .lineLimit(1)
+            Toggle("Show \(provider.label) \(name)", isOn: Binding(
+                get: { visible },
+                set: { model.setHidden(!$0, service: provider.service, name: name) }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .tint(provider.color)
+            .controlSize(.mini)
+        }
+        .opacity(visible ? 1 : 0.55)
     }
 }
 

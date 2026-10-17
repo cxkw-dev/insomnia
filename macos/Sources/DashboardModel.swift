@@ -44,9 +44,16 @@ final class DashboardModel: ObservableObject {
     @Published private(set) var refreshError: String?
     @Published private(set) var assertionError: String?
     @Published private(set) var refreshedAt: Date?
+    /// The popover's account editor is open.
+    @Published var isEditingAccounts = false
+    /// Accounts turned off in accounts.conf; listed only by the editor.
+    @Published private(set) var hiddenAccounts: [AccountVisibility.Entry] = []
 
     private let assertion = DisplayAssertion()
     private var refreshTimer: Timer?
+    /// A refresh was asked for while one was running (e.g. right after a
+    /// visibility change); run it as soon as the current one lands.
+    private var refreshQueued = false
 
     init() {
         if ProcessInfo.processInfo.environment["INSOMNIA_START_AWAKE"] == "1" {
@@ -73,11 +80,38 @@ final class DashboardModel: ObservableObject {
         refresh()
     }
 
+    /// Turn an account on or off in accounts.conf, update the editor at once,
+    /// and refresh so the change reaches the rest of the popover.
+    func setHidden(_ hidden: Bool, service: String, name: String) {
+        do {
+            try AccountVisibility.setHidden(hidden, service: service, name: name)
+            refreshError = nil
+        } catch {
+            refreshError = "Could not update \(AccountVisibility.url.path): \(error.localizedDescription)"
+            return
+        }
+        hiddenAccounts = AccountVisibility.hidden()
+        if hidden {
+            content.accounts.removeAll { $0.provider.service == service && $0.name == name }
+        }
+        refresh()
+    }
+
     func refresh() {
-        guard !isLoading else { return }
+        hiddenAccounts = AccountVisibility.hidden()
+        guard !isLoading else {
+            refreshQueued = true
+            return
+        }
         isLoading = true
         Task {
-            defer { isLoading = false }
+            defer {
+                isLoading = false
+                if refreshQueued {
+                    refreshQueued = false
+                    refresh()
+                }
+            }
             do {
                 let snapshot = try await SnapshotRunner.load()
                 content = parseDashboard(snapshot.cards, groups: snapshot.accounts ?? AccountGroups())
