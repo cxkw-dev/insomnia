@@ -21,6 +21,7 @@ make install   # rebuild and replace the installed binary
 make macos     # build dist/Insomnia.app with the bundled snapshot helper
 make install-app   # build, copy to /Applications (or ~/Applications), login item, relaunch
 make uninstall-app # remove the installed app and its login item
+make setup     # starter config + ai usage card into ~/.config/insomnia (never overwrites)
 cd terminal && cargo test durations   # a single test, by substring
 ```
 
@@ -50,6 +51,9 @@ One repo, two apps that share `~/.config/insomnia/config.toml`:
 - `macos/` — the Swift menu bar app plus `build.sh`, `install.sh`,
   `uninstall.sh`, fonts, and icons. It bundles the snapshot helper from
   `terminal/target/release/`.
+- `cards/` — the optional `ai-usage.sh` card, `config.example.toml`, an
+  `accounts.conf` example, and `setup.sh` (`make setup`). A test parses
+  `config.example.toml`, so keep it valid.
 - `dist/` — gitignored output of `make macos`.
 
 The root holds only the Makefile, README, LICENSE, and this file. Module
@@ -64,7 +68,8 @@ One render thread, one thread per data source, one channel between them.
   and battery status via `pmset`.
 - `config.rs` — CLI flags, durations, and the TOML config
   (`~/.config/insomnia/config.toml`): docker toggle, `[sky]` flyer toggles,
-  `[[card]]` blocks, `[dashboard] combined`.
+  `[[card]]` blocks, `[dashboard] combined`, and `[accounts]` (menu bar
+  grouping; the snapshot passes it through, the TUI ignores it).
 - `collect.rs` — background threads for docker and card commands, streaming
   `Update`s over mpsc; also the row protocol parser (`parse_row`).
 - `cards.rs` — turns collected data into render-ready `SideCard`s
@@ -85,6 +90,12 @@ One render thread, one thread per data source, one channel between them.
 
 ## Invariants worth knowing
 
+- **Nothing personal in the repo.** Account names, emails, and credentials
+  live only in the user's `~/.config/insomnia/` (config `[accounts]`,
+  `ai-usage/accounts.conf`, captured snapshots). Fixtures use generic names
+  like `personal` / `work account`; the app never hardcodes an identity.
+  The installed `~/.config/insomnia/ai-usage.sh` is a copy — repo changes to
+  `cards/ai-usage.sh` don't reach it until copied over.
 - **The default is focused and uppercase.** Keep one frame with the session
   anchored above a scrollable dashboard. `combined = false` retains separate
   cards. Source commands and data are not rewritten; only displayed text is

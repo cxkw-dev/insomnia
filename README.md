@@ -61,19 +61,27 @@ and it doesn't pretend to run anywhere else.
 That's one frame, rendered headlessly in monochrome — the real thing is in
 color, with a sparse, slowly moving sky around a steady dashboard.
 
-The AI usage section in this preview uses synthetic data from a custom card;
-the card is not bundled, and insomnia does not read provider credentials. Docker is
-the only built-in dashboard integration. Everything else uses the documented
-custom-card protocol below.
+The AI usage section in this preview uses synthetic data. The real thing is an
+optional card in [`cards/`](cards/) that reads your own Claude, Codex, and
+Copilot logins — see [AI usage](#ai-usage). insomnia itself never touches
+provider credentials: Docker is the only built-in integration, and everything
+else is a shell command speaking the [card protocol](#the-dashboard).
 
 ## Install
 
 Requires [Rust](https://rustup.rs) and a Mac.
 
 ```sh
-cargo install --path terminal
+git clone https://github.com/cxkw-dev/insomnia && cd insomnia
+make install   # builds the `insomnia` binary into ~/.cargo/bin
+make setup     # optional: starter config + the AI usage card
 insomnia
 ```
+
+`make setup` writes `~/.config/insomnia/config.toml`,
+`~/.config/insomnia/ai-usage.sh`, and an empty account list. It never
+overwrites a file you already have. Skip it and insomnia runs with defaults —
+no config file is needed at all.
 
 Already installed from this checkout? Rebuild the copy on your `PATH`, quit the
 running app with `q`, and launch it again:
@@ -90,12 +98,13 @@ Mac goes back to sleeping on its own schedule.
 
 The native macOS app lives in [`macos/`](macos/). It keeps the CLI intact and
 reads the same `~/.config/insomnia/config.toml` cards through a bundled Rust
-helper. The popover groups AI accounts into **Business AI** and **Personal**,
-with `personal` accounts under Personal. Each provider's mark and quota meters
-use its brand color, with reset details below. It refreshes every 30 seconds
-and has a manual refresh button.
+helper. The popover groups AI accounts into **Business AI** and **Personal**
+(see [grouping accounts](#grouping-accounts)). Each provider's mark and quota
+meters use its brand color, with reset details below. It refreshes every 30
+seconds and has a manual refresh button.
 
-Install it with the macOS Command Line Tools present:
+Install it with the macOS Command Line Tools present
+(`xcode-select --install`):
 
 ```sh
 make install-app     # builds, copies to /Applications (or ~/Applications), starts at login
@@ -117,10 +126,10 @@ and restrained glow from [Vercel's homepage](https://vercel.com/home). It uses
 Geist type, thin quota meters, and compact provider marks.
 The marks and their sources are documented in [`macos/Icons/`](macos/Icons/).
 
-The app uses your existing card commands, including the local `ai usage` card
-if you have configured one. If no cards are configured, add a `[[card]]` block
-as described below. Credentials stay with the local commands; the app reads
-their rendered rows.
+The app uses your existing card commands, including the AI usage card if
+you've run `make setup`. With no cards configured, it says so and points at the
+config file. Credentials stay with the local commands; the app only reads their
+rendered rows.
 
 ## Usage
 
@@ -265,7 +274,8 @@ done
 '''
 ```
 
-And a complete config, all three sections together:
+And a complete config, every section together (the annotated starting point
+is [`cards/config.example.toml`](cards/config.example.toml)):
 
 ```toml
 # ~/.config/insomnia/config.toml
@@ -276,6 +286,12 @@ enabled = true    # the default; false retires the docker card
 [sky]
 comets = false    # a calmer night — shooting stars only
 
+[dashboard]
+combined = true   # the default single frame
+
+[accounts]        # menu bar grouping for AI accounts
+personal = ["jane"]
+
 [[card]]
 title = "pull requests"
 glyph = "⇄"
@@ -285,6 +301,84 @@ command = 'gh search prs --state=open --review-requested=@me --json title --jq "
 ```
 
 No config file is needed at all — everything above is optional.
+
+## AI usage
+
+[`cards/ai-usage.sh`](cards/ai-usage.sh) is an optional card that shows quota
+windows, reset times, spend, and a per-hour trend for:
+
+| service | where accounts come from | needs |
+|---------|--------------------------|-------|
+| Claude | Claude Code's login (Keychain) and Claude Desktop's active session | `jq`, `curl` |
+| Codex | `~/.codex/auth.json`, shared by the Codex CLI and Codex Desktop | `jq`, `curl` |
+| Copilot | every account in `gh auth status` | `jq`, `curl`, [`gh`](https://cli.github.com) |
+
+`make setup` installs it and adds this card to your config:
+
+```toml
+[[card]]
+title = "ai usage"
+glyph = "✦"
+accent = "slate"
+interval = 30
+command = '"${XDG_CONFIG_HOME:-$HOME/.config}/insomnia/ai-usage.sh" all'
+```
+
+Services you aren't logged into are left out. Run it by hand to see what the
+card will show: `~/.config/insomnia/ai-usage.sh all`.
+
+### Adding accounts
+
+**Whatever you're logged into shows up on its own,** marked `▸`. For more:
+
+- **Copilot:** `gh auth login` each GitHub account. All of them appear.
+- **A second Claude or Codex account:** log into it (`/login` inside Claude
+  Code, or `codex login`), save a snapshot under a name you choose, then log
+  back into your usual one:
+
+  ```sh
+  ~/.config/insomnia/ai-usage.sh capture claude work
+  ~/.config/insomnia/ai-usage.sh capture codex work
+  ```
+
+- **Always list an account,** even while it's logged out everywhere, by
+  naming it in `~/.config/insomnia/ai-usage/accounts.conf`. It shows as a dim
+  `not logged in` row until a login or capture with that name exists:
+
+  ```text
+  claude work
+  codex personal
+  copilot my-github-handle
+  ```
+
+OAuth refresh tokens rotate. A captured account keeps working while it's
+logged in somewhere the card can see. Once it's logged out everywhere, its
+snapshot eventually expires, and the row says `stale 2d` instead of showing
+old numbers as current. Capture it again to revive it.
+
+### Grouping accounts
+
+The menu bar app sorts AI accounts into **Business AI** and **Personal**.
+Unlisted accounts are grouped by plan: org, business, enterprise, and team plans
+go under Business AI, and everything else goes under Personal. Name accounts
+in `[accounts]` to override that. Each entry is a case-insensitive piece of
+the account name the card prints:
+
+```toml
+[accounts]
+personal = ["jane", "side-project"]
+business = ["acme"]
+```
+
+### Where your data lives
+
+Everything stays in `~/.config/insomnia/ai-usage/` (mode 700): captured
+logins, a short response cache, and trend samples. Nothing goes in the repo or
+the TOML file. The script only talks to the providers' own usage endpoints.
+These are the same undocumented endpoints their apps use for usage screens,
+so they can change without notice. It reads Claude Desktop's session the way
+the desktop app stores it, which means macOS may ask once for Keychain access
+to "Claude Safe Storage".
 
 ## The sky
 
@@ -352,6 +446,7 @@ make run       # the real thing, from the working tree
 make check     # fmt + clippy + tests
 make preview   # one headless frame (cargo run --example preview <w> <h> <tick>)
 make install   # rebuild and replace the installed binary
+make setup     # starter config + ai usage card (never overwrites)
 
 # inspect the actual terminal cells in color using fixture data
 cargo run --quiet --manifest-path terminal/Cargo.toml --example preview 110 46 7 --html > preview.html

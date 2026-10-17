@@ -57,6 +57,23 @@ private enum Typography {
 
 private struct Snapshot: Decodable, Sendable {
     let cards: [UsageCard]
+    let accounts: AccountGroups?
+}
+
+/// The config's `[accounts]` table: name substrings that pin an account to a group.
+private struct AccountGroups: Decodable, Sendable {
+    var personal: [String] = []
+    var business: [String] = []
+
+    func category(for name: String) -> AccountCategory? {
+        let identity = name.lowercased()
+        func claims(_ patterns: [String]) -> Bool {
+            patterns.contains { identity.contains($0.lowercased()) }
+        }
+        if claims(personal) { return .personal }
+        if claims(business) { return .business }
+        return nil
+    }
 }
 
 private struct UsageCard: Decodable, Sendable {
@@ -173,6 +190,7 @@ private enum SnapshotRunner {
 @MainActor
 private final class DashboardModel: ObservableObject {
     @Published private(set) var cards: [UsageCard] = []
+    @Published private(set) var accountGroups = AccountGroups()
     @Published private(set) var isAwake = false
     @Published private(set) var loading = false
     @Published private(set) var message: String?
@@ -216,6 +234,7 @@ private final class DashboardModel: ObservableObject {
             switch result {
             case let .success(snapshot):
                 cards = snapshot.cards
+                accountGroups = snapshot.accounts ?? AccountGroups()
                 refreshedAt = Date()
                 message = nil
             case let .failure(error):
@@ -407,18 +426,17 @@ private struct AIAccount: Identifiable {
     let detail: String?
     var meters: [UsageRow] = []
 
-    init(id: String, provider: AIProvider, row: UsageRow) {
+    init(id: String, provider: AIProvider, row: UsageRow, groups: AccountGroups) {
         self.id = id
         self.provider = provider
         name = row.name.replacingOccurrences(
             of: "^[▸›\\s]+", with: "", options: .regularExpression
         )
         detail = row.detail
-        let identity = name.lowercased()
         let planWords = Set((row.detail ?? "").lowercased().components(
             separatedBy: CharacterSet.alphanumerics.inverted
         ))
-        category = identity.contains("personal") ? .personal :
+        category = groups.category(for: name) ??
             (["org", "business", "enterprise", "ent", "biz", "team"]
                 .contains { planWords.contains($0) } ? .business : .personal)
     }
@@ -440,7 +458,10 @@ private struct DashboardView: View {
                 } else if let provider, row.health != nil,
                           !row.name.lowercased().contains("nearest limit") {
                     if let account { accounts.append(account) }
-                    account = AIAccount(id: "\(cardIndex)-\(rowIndex)", provider: provider, row: row)
+                    account = AIAccount(
+                        id: "\(cardIndex)-\(rowIndex)", provider: provider, row: row,
+                        groups: model.accountGroups
+                    )
                 } else if row.percent != nil {
                     account?.meters.append(row)
                 }

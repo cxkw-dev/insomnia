@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::power::Kind;
 use crate::sky;
@@ -114,6 +114,20 @@ pub struct FileConfig {
     #[serde(rename = "card")]
     pub cards: Vec<CardConfig>,
     pub dashboard: DashboardConfig,
+    pub accounts: AccountsConfig,
+}
+
+/// The `[accounts]` table: how the menu bar app groups AI accounts. Each
+/// entry is a case-insensitive substring of an account row's name, so
+/// `personal = ["me@example.com"]` claims that login wherever it appears.
+/// Explicit entries win; unlisted accounts fall back to the plan in their
+/// detail (org, business, enterprise, team → business; anything else →
+/// personal). The terminal UI ignores this table.
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AccountsConfig {
+    pub personal: Vec<String>,
+    pub business: Vec<String>,
 }
 
 /// The `[dashboard]` table. `combined = true` folds every card — custom and
@@ -259,6 +273,11 @@ fn parse_file(text: &str) -> Result<FileConfig, String> {
     if let Some(sd) = &cfg.dashboard.side {
         if sd != "left" && sd != "right" {
             return Err(format!("[dashboard]: unknown side '{sd}' (left or right)"));
+        }
+    }
+    for name in cfg.accounts.personal.iter().chain(&cfg.accounts.business) {
+        if name.trim().is_empty() {
+            return Err("[accounts]: entries must not be empty".into());
         }
     }
     for key in cfg.sky.keys() {
@@ -416,6 +435,26 @@ mod tests {
         assert!(cfg.cards.is_empty());
         assert!(cfg.sky.is_empty());
         assert!(cfg.dashboard.combined);
+        assert!(cfg.accounts.personal.is_empty());
+    }
+
+    #[test]
+    fn accounts_group_by_name() {
+        let cfg = parse_file(
+            "[accounts]\npersonal = [\"me@example.com\"]\nbusiness = [\"acme\", \"work\"]",
+        )
+        .unwrap();
+        assert_eq!(cfg.accounts.personal, ["me@example.com"]);
+        assert_eq!(cfg.accounts.business, ["acme", "work"]);
+        assert!(parse_file("[accounts]\npersonal = [\" \"]").is_err());
+        assert!(parse_file("[accounts]\nhobby = [\"x\"]").is_err());
+    }
+
+    #[test]
+    fn shipped_example_config_parses() {
+        let cfg = parse_file(include_str!("../../cards/config.example.toml")).unwrap();
+        assert_eq!(cfg.cards.len(), 1);
+        assert!(cfg.accounts.personal.is_empty());
     }
 
     #[test]

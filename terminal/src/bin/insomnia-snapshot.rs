@@ -16,6 +16,7 @@ struct SnapshotCard<'a> {
 #[derive(Serialize)]
 struct Snapshot<'a> {
     cards: Vec<SnapshotCard<'a>>,
+    accounts: &'a config::AccountsConfig,
 }
 
 fn main() -> ExitCode {
@@ -62,7 +63,13 @@ fn main() -> ExitCode {
             },
         })
         .collect();
-    match serde_json::to_writer(std::io::stdout(), &Snapshot { cards }) {
+    match serde_json::to_writer(
+        std::io::stdout(),
+        &Snapshot {
+            cards,
+            accounts: &cfg.accounts,
+        },
+    ) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("insomnia-snapshot: {error}");

@@ -604,7 +604,7 @@ mod tests {
             rows: vec![
                 CardRow {
                     health: Some(Health::Bad),
-                    name: "acme.worker".into(),
+                    name: "work.account".into(),
                     detail: Some("business · 0 credits left · limit reached · stale 2d".into()),
                     ..CardRow::default()
                 },

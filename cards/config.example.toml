@@ -1,0 +1,39 @@
+# ~/.config/insomnia/config.toml — `make setup` starts you from this file.
+# Every section is optional; delete what you don't want.
+
+[docker]
+enabled = true # false hides the docker section
+
+[sky]
+# motion = false       # start with a still sky (`m` toggles it)
+# comets = false
+# shooting_stars = false
+
+[dashboard]
+combined = true # one frame; false keeps separate cards
+
+# How the menu bar app groups AI accounts. Each entry is a case-insensitive
+# piece of an account name as the ai usage card prints it (the part before
+# the @ for live logins, or the name you gave `ai-usage.sh capture`).
+# Unlisted accounts are grouped by plan: org/business/enterprise/team plans
+# go under Business AI, everything else under Personal.
+[accounts]
+personal = [] # e.g. ["jane", "side-project"]
+business = [] # e.g. ["jane.doe", "acme"]
+
+# AI usage for Claude, Codex, and Copilot. See ai-usage.sh for adding accounts.
+[[card]]
+title = "ai usage"
+glyph = "✦"
+accent = "slate"
+interval = 30
+command = '"${XDG_CONFIG_HOME:-$HOME/.config}/insomnia/ai-usage.sh" all'
+
+# More ideas — uncomment to try.
+#
+# [[card]]
+# title = "pull requests"
+# glyph = "⇄"
+# accent = "sky"
+# interval = 120
+# command = 'gh search prs --state=open --review-requested=@me --json title --jq ".[].title"'

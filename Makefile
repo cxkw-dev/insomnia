@@ -3,6 +3,7 @@
 # Two apps live in this repo:
 #   terminal/  the Rust TUI (`insomnia`) and the `insomnia-snapshot` helper
 #   macos/     the Swift menu bar app, which bundles that helper
+#   cards/     the optional ai usage card and a starter config (`make setup`)
 #
 # Neither the `insomnia` on your PATH nor the app in ~/Applications tracks
 # the working tree. After changing code, `make install` (terminal) or
@@ -10,12 +11,16 @@
 
 CARGO := cd terminal && cargo
 
-.PHONY: install run check test preview macos install-app uninstall-app
+.PHONY: install setup run check test preview macos install-app uninstall-app
 
 # --- terminal app -----------------------------------------------------------
 
 install:
 	cargo install --path terminal --quiet
+
+# Starter config + ai usage card in ~/.config/insomnia; never overwrites.
+setup:
+	sh cards/setup.sh
 
 run:
 	$(CARGO) run
