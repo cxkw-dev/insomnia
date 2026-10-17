@@ -14,7 +14,7 @@ run on a Mac.
 
 ```sh
 make run       # run from the working tree
-make check     # fmt --check + clippy -D warnings + tests — run before committing
+make check     # fmt, clippy -D warnings, tests, Swift typecheck, script syntax — run before committing
 make test      # cargo test
 make preview   # one headless frame (cargo run --example preview <w> <h> <tick>)
 make screenshots   # regenerate docs/terminal.png + docs/menubar.png from fixtures
@@ -22,7 +22,7 @@ make install   # rebuild and replace the installed binary
 make macos     # build dist/Insomnia.app with the bundled snapshot helper
 make install-app   # build, copy to /Applications (or ~/Applications), login item, relaunch
 make uninstall-app # remove the installed app and its login item
-make setup     # starter config + ai usage card into ~/.config/insomnia (never overwrites)
+make setup     # starter config + ai usage card into ~/.config/insomnia (updates the script, keeps config)
 cd terminal && cargo test durations   # a single test, by substring
 ```
 
@@ -54,7 +54,8 @@ One repo, two apps that share `~/.config/insomnia/config.toml`:
   `uninstall.sh`, fonts, and icons. It bundles the snapshot helper from
   `terminal/target/release/`.
 - `cards/` — the optional `ai-usage.sh` card, `config.example.toml`, an
-  `accounts.conf` example, and `setup.sh` (`make setup`). A test parses
+  `accounts.conf` example, and `setup.sh` (`make setup`: always installs the
+  script, never overwrites config or accounts). A test parses
   `config.example.toml`, so keep it valid.
 - `docs/` — README images, `screenshots.sh`, `frame.swift` (rounded corners
   and shadow), and the fixture rows the menu bar shot uses.
@@ -68,29 +69,41 @@ paths below (`main.rs`, `ui.rs`, …) are relative to `terminal/src/`.
 One render thread, one thread per data source, one channel between them.
 
 - `main.rs` — flags, assertion creation, quiet mode; hands off to `ui::run`.
+- `duration.rs` — parsing (`1h30m`) and formatting (`01:17:43`, `1h 30m`).
+- `text.rs` — display-width truncate / pad / pair / wrap. Measure in cells,
+  never `chars().count()`, and uppercase before measuring.
 - `power.rs` — IOKit assertions (created before the TUI, dropped on exit)
   and battery status via `pmset`.
 - `config.rs` — CLI flags, durations, and the TOML config
   (`~/.config/insomnia/config.toml`): docker toggle, `[sky]` flyer toggles,
-  `[[card]]` blocks, `[dashboard] combined`, and `[accounts]` (menu bar
-  grouping; the snapshot passes it through, the TUI ignores it).
+  `[[card]]` blocks (typed `Accent` / `Side`), `[dashboard] combined`, and
+  `[accounts]` (menu bar grouping; the snapshot passes it through, the TUI
+  ignores it).
 - `collect.rs` — background threads for docker and card commands, streaming
-  `Update`s over mpsc; also the row protocol parser (`parse_row`).
+  `Update`s over mpsc; card commands run in their own process group and are
+  killed whole on timeout. Also the row protocol parser (`parse_row`) and
+  the shared severity cutoffs (`WARN_PCT`, `BAD_PCT`, `severity`).
 - `cards.rs` — turns collected data into render-ready `SideCard`s
-  (`build_cards`) and draws them: health rows, section headers, meters.
-- `dashboard.rs` — provider colors, stable selection identities,
-  always-visible quota details, and wrapped text for the default combined layout.
+  (`build_cards`; a failed refresh keeps the last `Feed` rows, marked stale)
+  and draws rows: health rows, group headers, meters, and the meter column
+  constants the dashboard aligns to.
+- `dashboard.rs` — the combined layout: each card a section, meters attached
+  to their account, stable selection identities (card, header, name).
 - `bin/insomnia-snapshot.rs` — JSON snapshot of the configured cards for the
   menu bar app, using the same collector and row protocol as the TUI.
-- `ui.rs` — the event loop, layout (wide / stacked / three-column / merged /
-  compact), and the status card.
+- `ui.rs` — the event loop and both layouts: combined (session over the
+  scrollable dashboard) and separate boxes (wide / stacked / three-column),
+  each falling back to compact. `draw` dispatches on `ViewState.dashboard`.
 - `sky.rs` — starfield and glint ambience plus the `FLYERS` registry
   (comets, shooting stars).
 - `art.rs` — the title art. `pixel.rs` — half-block pixel primitive.
   `theme.rs` — the shared palette.
-- `macos/Sources/InsomniaApp.swift` — SwiftUI menu bar popover, account grouping,
-  provider marks, and a display sleep assertion. `macos/build.sh` bundles it
-  with the Rust helper, fonts, and icons; `dist/` is ignored.
+- `macos/Sources/` — the SwiftUI menu bar app: `Snapshot.swift` (decoding
+  and the async helper runner), `Accounts.swift` (turns snapshot rows into
+  provider accounts once per refresh), `DashboardModel.swift`,
+  `DashboardView.swift`, `Appearance.swift`, and `InsomniaApp.swift`.
+  `macos/build.sh` compiles every file and bundles the Rust helper, fonts,
+  and icons; `dist/` is ignored.
 
 ## Invariants worth knowing
 
@@ -99,7 +112,11 @@ One render thread, one thread per data source, one channel between them.
   `ai-usage/accounts.conf`, captured snapshots). Fixtures use generic names
   like `personal` / `work account`; the app never hardcodes an identity.
   The installed `~/.config/insomnia/ai-usage.sh` is a copy — repo changes to
-  `cards/ai-usage.sh` don't reach it until copied over.
+  `cards/ai-usage.sh` don't reach it until `make setup`.
+- **Never rotate a login without cause.** `ai-usage.sh` refreshes an OAuth
+  token only when it has expired or the API answered 401, under a
+  `with_lock` lock, re-reading credentials after acquiring it. Refresh tokens
+  are single-use and shared with the providers' own CLIs.
 - **The default is focused and uppercase.** Keep one frame with the session
   anchored above a scrollable dashboard. `combined = false` retains separate
   cards. Source commands and data are not rewritten; only displayed text is
@@ -110,7 +127,7 @@ One render thread, one thread per data source, one channel between them.
   Source-marked stale values keep their gauge with an explicit stale label.
 
 - **Height budgets are counted in rows.** Card spacing must live in the row
-  lists themselves (see `space_sections`) — a line conjured at render time is
+  lists themselves (see `space_headers`) — a line conjured at render time is
   one the layout never reserved, and the card silently loses its last row.
 - **Folding reruns placement.** A card that doesn't fit folds into a summary
   row inside the status card, which shrinks the very budget being divided —
@@ -128,9 +145,11 @@ One render thread, one thread per data source, one channel between them.
   render-smoke tests rely on.
 - **The row protocol** (card command stdout, one row per line):
   `ok|name|detail`, `warn|…`, `bad|…`, `off|…` for health rows;
-  `hdr|accent|text` for section headers; `bar|accent|label|percent|detail`
+  `hdr|accent|text` for group headers; `bar|accent|label|percent|detail`
   for meters; anything else renders as plain text. Malformed protocol lines
-  fall back to plain text rather than erroring. Cards cap at 32 rows.
+  fall back to plain text rather than erroring. Cards cap at 64 rows plus a
+  `+N more rows` line. The menu bar treats a header as an AI provider only
+  when its last word is `claude`, `codex`, or `copilot`.
 
 ## Conventions
 

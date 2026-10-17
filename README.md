@@ -37,8 +37,9 @@ insomnia
 ```
 
 `make setup` writes `~/.config/insomnia/config.toml`, the AI usage script,
-and an empty account list. It never overwrites a file you already have. Skip
-it and insomnia runs on defaults.
+and an empty account list. Your config and account list are never
+overwritten; the script is updated to this checkout's version, so rerun it
+after pulling. Skip it and insomnia runs on defaults.
 
 Quit with `q`, `esc`, or `ctrl-c`; the assertions release instantly. To pick
 up code changes later, run `make install` again — the `insomnia` on your PATH
@@ -51,8 +52,9 @@ is a copy, not the working tree.
 A native SwiftUI popover that reads the same config and cards through a
 bundled Rust helper. AI accounts are grouped into **Business AI** and
 **Personal** ([you choose which](#grouping-accounts)), each provider in its
-brand color with reset times under every meter. Other cards show below. It
-refreshes every 30 seconds.
+brand color with reset times under every meter; an account that needs
+attention (near its limit, stale, or logged out) is tinted to say so. Other
+cards show below. It refreshes when you open it and every minute otherwise.
 
 The switch beside the wordmark keeps the display awake; the crescent turns
 amber while it's on. Quitting the app, or turning the switch off, releases it.
@@ -145,12 +147,14 @@ Rows use a tiny pipe-separated protocol. Anything else prints as plain text.
 | line | renders as |
 |------|------------|
 | `ok\|name\|detail` | a healthy item (`warn`, `bad`, and `off` for the other states; detail optional) |
-| `hdr\|accent\|text` | a section header, e.g. a provider or environment |
+| `hdr\|accent\|text` | a group header, e.g. a provider or environment |
 | `bar\|accent\|label\|percent\|detail` | a 0–100 meter, attached to the row above it |
 
 Accents: `violet` `pink` `sky` `blue` `emerald` `gold` `red` `slate` `coral`
-`teal`. A card shows at most 32 rows, and only once its command succeeds with
-output.
+`teal`. A card appears once its command succeeds with output and shows up to
+64 rows; the rest collapse into a `+N more rows` line. A command still running
+after 45 seconds is stopped, along with anything it started. When a refresh
+fails, the last good rows stay up, marked stale.
 
 Card commands are your own code running as you. Keep tokens out of the TOML;
 prefer authenticated CLIs (`gh`, `docker`), the Keychain, or your environment.
@@ -232,8 +236,11 @@ business = ["acme"]
 
 Everything stays on your Mac, in `~/.config/insomnia/ai-usage/` (mode 700):
 captured logins, a short response cache, and trend samples. The script talks
-only to each provider's own usage endpoint — the same undocumented ones their
-apps use, so they can change without notice. Reading Claude Desktop's session
+only to each provider's own usage and sign-in endpoints — the same
+undocumented ones their apps use, so they can change without notice. A login
+is refreshed only when its token has expired or been refused, one run at a
+time (the terminal and menu bar apps share a lock), and tokens never appear
+on a command line. Reading Claude Desktop's session
 may prompt once for Keychain access to "Claude Safe Storage".
 
 ## Configuration
@@ -297,7 +304,7 @@ rows; the animation never stutters.
 
 ```sh
 make run           # run from the working tree
-make check         # fmt + clippy + tests, before committing
+make check         # fmt, clippy, tests, Swift typecheck, script syntax
 make preview       # one headless text frame
 make screenshots   # regenerate docs/*.png from fixture data (needs Chrome)
 ```
