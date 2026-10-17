@@ -16,10 +16,10 @@ combined = true # one frame; false keeps separate cards
 # piece of an account name as the ai usage card prints it (the part before
 # the @ for live logins, or the name you gave `ai-usage.sh capture`).
 # Unlisted accounts are grouped by plan: org/business/enterprise/team plans
-# go under Business AI, everything else under Personal.
+# go under Enterprise, everything else under Personal.
 [accounts]
 personal = [] # e.g. ["jane", "side-project"]
-business = [] # e.g. ["jane.doe", "acme"]
+enterprise = [] # e.g. ["jane.doe", "acme"]
 
 # AI usage for Claude, Codex, and Copilot. See ai-usage.sh for adding accounts.
 [[card]]

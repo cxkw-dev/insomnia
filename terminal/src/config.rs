@@ -167,13 +167,15 @@ impl Default for DashboardConfig {
 /// case-insensitive substring of an account row's name, so
 /// `personal = ["me@example.com"]` claims that login wherever it appears.
 /// Explicit entries win; unlisted accounts fall back to the plan in their
-/// detail (org, business, enterprise, team → business; anything else →
+/// detail (org, business, enterprise, team → enterprise; anything else →
 /// personal). The terminal UI ignores this table.
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AccountsConfig {
     pub personal: Vec<String>,
-    pub business: Vec<String>,
+    /// `business` is the old name for this key and still accepted.
+    #[serde(alias = "business")]
+    pub enterprise: Vec<String>,
 }
 
 /// One custom dashboard card. `command` runs through `sh -c` every
@@ -261,7 +263,7 @@ fn parse_file(text: &str) -> Result<FileConfig, String> {
             ));
         }
     }
-    for name in cfg.accounts.personal.iter().chain(&cfg.accounts.business) {
+    for name in cfg.accounts.personal.iter().chain(&cfg.accounts.enterprise) {
         if name.trim().is_empty() {
             return Err("[accounts]: entries must not be empty".into());
         }
@@ -364,11 +366,13 @@ mod tests {
     #[test]
     fn accounts_group_by_name() {
         let cfg = parse_file(
-            "[accounts]\npersonal = [\"me@example.com\"]\nbusiness = [\"acme\", \"work\"]",
+            "[accounts]\npersonal = [\"me@example.com\"]\nenterprise = [\"acme\", \"work\"]",
         )
         .unwrap();
         assert_eq!(cfg.accounts.personal, ["me@example.com"]);
-        assert_eq!(cfg.accounts.business, ["acme", "work"]);
+        assert_eq!(cfg.accounts.enterprise, ["acme", "work"]);
+        let old = parse_file("[accounts]\nbusiness = [\"acme\"]").unwrap();
+        assert_eq!(old.accounts.enterprise, ["acme"]);
         assert!(parse_file("[accounts]\npersonal = [\" \"]").is_err());
         assert!(parse_file("[accounts]\nhobby = [\"x\"]").is_err());
     }

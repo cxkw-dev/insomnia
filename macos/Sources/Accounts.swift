@@ -69,15 +69,15 @@ enum AIProvider {
 }
 
 enum AccountCategory: Hashable, CaseIterable {
-    case business, personal
+    case enterprise, personal
 
-    var title: String { self == .business ? "Business AI" : "Personal" }
+    var title: String { self == .enterprise ? "Enterprise" : "Personal" }
 }
 
 /// The config's `[accounts]` table: name substrings that pin an account to a group.
 struct AccountGroups: Decodable, Sendable {
     var personal: [String] = []
-    var business: [String] = []
+    var enterprise: [String] = []
 
     func category(for name: String) -> AccountCategory? {
         let identity = name.lowercased()
@@ -85,7 +85,7 @@ struct AccountGroups: Decodable, Sendable {
             patterns.contains { identity.contains($0.lowercased()) }
         }
         if claims(personal) { return .personal }
-        if claims(business) { return .business }
+        if claims(enterprise) { return .enterprise }
         return nil
     }
 }
@@ -118,7 +118,7 @@ struct AIAccount: Identifiable {
         ))
         category = groups.category(for: name) ??
             (["org", "business", "enterprise", "ent", "biz", "team"]
-                .contains { planWords.contains($0) } ? .business : .personal)
+                .contains { planWords.contains($0) } ? .enterprise : .personal)
     }
 }
 

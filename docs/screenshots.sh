@@ -55,7 +55,7 @@ DESIGN_PREVIEW=1 sh "$repo_root/macos/build.sh" >/dev/null
 mkdir -p "$work/xdg/insomnia"
 cat > "$work/xdg/insomnia/config.toml" <<TOML
 [accounts]
-business = ["work account", "example-team"]
+enterprise = ["work account", "example-team"]
 
 [[card]]
 title = "ai usage"

@@ -14,7 +14,7 @@ This repo contains **two separate apps**. Use either one, or both:
   </tr>
   <tr>
     <td><img src="docs/terminal.png" alt="The insomnia terminal app: a session timer above an AI usage dashboard in a starfield"></td>
-    <td align="center"><img src="docs/menubar.png" alt="The Insomnia menu bar popover: AI accounts grouped into Business AI and Personal with quota meters" width="300"></td>
+    <td align="center"><img src="docs/menubar.png" alt="The Insomnia menu bar popover: AI accounts grouped into Enterprise and Personal with quota meters" width="300"></td>
   </tr>
   <tr>
     <td>A full-screen terminal UI. Run it when you want the Mac awake; quit
@@ -29,7 +29,7 @@ This repo contains **two separate apps**. Use either one, or both:
 |--|--------------|--------------|
 | **Start it** | run `insomnia` | starts at login; click ☾ |
 | **Keeps awake** | display, system, lid-closed, disks — you pick; for a set time or until you quit | display only, while the switch is on |
-| **Shows** | your cards, Docker containers, the session timer | your cards, with AI accounts grouped into Business and Personal |
+| **Shows** | your cards, Docker containers, the session timer | your cards, with AI accounts grouped into Enterprise and Personal |
 | **Built from** | [`terminal/`](terminal/) (Rust) | [`macos/`](macos/) (Swift + a Rust helper from `terminal/`) |
 | **Install** | `make install` | `make install-app` |
 
@@ -112,7 +112,7 @@ the edges. `m` freezes it; `[sky] motion = false` starts it still, and
 Click the moon to open the popover. It shows:
 
 - **AI accounts** from the [AI usage card](#ai-usage-card), grouped into
-  **Business AI** and **Personal**, each with its quota meters and reset
+  **Enterprise** and **Personal**, each with its quota meters and reset
   times. An account near its limit, stale, or logged out is tinted.
 - **Every other card** below, as plain rows.
 
@@ -129,13 +129,13 @@ The popover refreshes when you open it and every minute in the background.
 ### Grouping accounts
 
 Accounts are grouped by plan: org, business, enterprise, and team plans go
-under Business AI, everything else under Personal. To place an account
+under Enterprise, everything else under Personal. To place an account
 yourself, list any case-insensitive part of its name in your config:
 
 ```toml
 [accounts]
 personal = ["jane", "side-project"]
-business = ["acme"]
+enterprise = ["acme"]
 ```
 
 ## Cards (both apps)
@@ -256,7 +256,7 @@ Everything is optional. The annotated starting point is
 | section | used by | what it does |
 |---------|---------|--------------|
 | `[[card]]` | both apps | dashboard cards (any number) |
-| `[accounts]` | menu bar app | which AI accounts are Business or Personal |
+| `[accounts]` | menu bar app | which AI accounts are Enterprise or Personal |
 | `[dashboard]` | terminal app | `combined = false` for separate boxes |
 | `[docker]` | terminal app | `enabled = false` hides containers |
 | `[sky]` | terminal app | `motion`, `comets`, `shooting_stars` |
