@@ -51,7 +51,9 @@ enum AppError: LocalizedError {
 }
 
 enum SnapshotRunner {
-    static let timeout: TimeInterval = 20
+    /// Longer than the helper's own per-card deadline, so a slow card comes
+    /// back as that card's error rather than a killed helper.
+    static let timeout: TimeInterval = 35
 
     static func load() async throws -> Snapshot {
         guard let helper = Bundle.main.path(forAuxiliaryExecutable: "insomnia-snapshot") else {

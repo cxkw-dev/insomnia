@@ -8,10 +8,11 @@ use std::time::Duration;
 use insomnia::{collect, config};
 use serde::Serialize;
 
-/// Per-card deadline. The app gives the whole snapshot 20s, and cards run
+/// Per-card deadline. The app gives the whole snapshot 35s, and cards run
 /// in parallel, so this leaves room to report a slow card instead of being
-/// killed with nothing to say.
-const CARD_TIMEOUT: Duration = Duration::from_secs(15);
+/// killed with nothing to say. It has to outlast a couple of the card's own
+/// 15s network calls, or one slow request fails the whole card.
+const CARD_TIMEOUT: Duration = Duration::from_secs(30);
 
 const USAGE: &str = "usage: insomnia-snapshot [--config <path>]";
 

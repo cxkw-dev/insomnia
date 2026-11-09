@@ -54,6 +54,8 @@ DIR="${XDG_CONFIG_HOME:-$HOME/.config}/insomnia/ai-usage"
 CACHE="$DIR/cache"
 TREND="$DIR/trend"
 mkdir -p "$DIR/codex" "$DIR/claude" "$CACHE" "$TREND"
+# A run killed at its caller's deadline leaves its half-written temp files.
+find "$CACHE" "$TREND" -maxdepth 1 -name '*.tmp.*' -mmin +10 -delete 2>/dev/null
 chmod 700 "$DIR"
 
 CODEX_CLIENT_ID="app_EMoamEEZ73f0CkXaXp7hrann"          # public, from openai/codex source
@@ -1104,10 +1106,19 @@ rollup_line() {
 }
 
 case ${1:-} in
-  all)     body=$(
-             c=$(claude_rows);  [ -n "$c" ] && { echo "hdr|coral|✻ claude"; printf '%s\n' "$c"; }
-             o=$(codex_rows);   [ -n "$o" ] && { echo "hdr|teal|◎ openai codex"; printf '%s\n' "$o"; }
-             p=$(copilot_rows); [ -n "$p" ] && { echo "hdr|violet|⧉ copilot"; printf '%s\n' "$p"; }
+  all)     # The providers share nothing (own caches, own locks), so fetch
+           # them side by side: a cold run costs the slowest provider, not
+           # the sum, which is what keeps it inside the callers' deadlines.
+           part=$(mktemp -d "${TMPDIR:-/tmp}/ai-usage.XXXXXX") || exit 0
+           trap 'rm -rf "$part"' EXIT
+           claude_rows  > "$part/claude"  &
+           codex_rows   > "$part/codex"   &
+           copilot_rows > "$part/copilot" &
+           wait
+           body=$(
+             c=$(cat "$part/claude");  [ -n "$c" ] && { echo "hdr|coral|✻ claude"; printf '%s\n' "$c"; }
+             o=$(cat "$part/codex");   [ -n "$o" ] && { echo "hdr|teal|◎ openai codex"; printf '%s\n' "$o"; }
+             p=$(cat "$part/copilot"); [ -n "$p" ] && { echo "hdr|violet|⧉ copilot"; printf '%s\n' "$p"; }
            )
            top=$(printf '%s\n' "$body" | rollup_line)
            [ -n "$top" ] && printf '%s\n' "$top"

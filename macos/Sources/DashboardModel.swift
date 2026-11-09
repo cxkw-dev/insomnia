@@ -114,8 +114,15 @@ final class DashboardModel: ObservableObject {
             }
             do {
                 let snapshot = try await SnapshotRunner.load()
-                content = parseDashboard(snapshot.cards, groups: snapshot.accounts ?? AccountGroups())
                 hasCards = !snapshot.cards.isEmpty
+                // A card whose command failed comes back with no rows. Keep
+                // showing the last good reading (its time stays in the
+                // footer) under the error instead of blanking the popover.
+                if refreshedAt != nil, let failure = snapshot.cards.compactMap(\.error).first {
+                    refreshError = failure
+                    return
+                }
+                content = parseDashboard(snapshot.cards, groups: snapshot.accounts ?? AccountGroups())
                 refreshedAt = Date()
                 refreshError = nil
             } catch {
