@@ -38,8 +38,8 @@ This repo contains **two separate apps**. Use either one, or both:
 appears in both apps. The optional [AI usage card](#ai-usage-card) is one of
 those.
 
-**macOS only.** Both hold IOKit power assertions directly, the same mechanism
-as `caffeinate`, with no sudo and no helper process.
+**macOS only.** Both hold IOKit power assertions themselves. They never run
+`caffeinate`, need no sudo, and start no helper process.
 
 ## Install
 
@@ -285,8 +285,8 @@ names.
 
 ## How it works
 
-Both apps call `IOPMAssertionCreateWithName`, the API `caffeinate` uses. The
-kernel ties each assertion to the process holding it, so it's released the
+Both apps call `IOPMAssertionCreateWithName` directly. It's the same IOKit API
+`caffeinate` is built on, but nothing shells out to `caffeinate`. The kernel ties each assertion to the process holding it, so it's released the
 moment that process exits — even on `SIGKILL`. Check while either runs:
 
 ```sh
